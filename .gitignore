@@ -1,0 +1,10 @@
+build/
+.venv/
+__pycache__/
+.env
+.env.*
+.secrets*
+vendor/
+.pytest_cache/
+.ruff_cache/
+benchmarks/results/

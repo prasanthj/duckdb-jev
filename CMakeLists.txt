@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+project(jev)
+set(CMAKE_CXX_STANDARD 17)
+find_package(CURL REQUIRED)
+include_directories(src/include)
+build_loadable_extension(jev "" src/jev_extension.cpp)
+target_link_libraries(jev_loadable_extension CURL::libcurl)
