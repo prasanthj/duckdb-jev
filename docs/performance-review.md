@@ -130,3 +130,9 @@ The earlier concurrent-miss and missing-streaming limitations above describe his
 Independent cache/query-cache/streaming review and 52 regression tests passed. No blockers remain. Verified model/endpoint/credential invalidation, connection isolation, non-sliding TTL, LRU eviction, budgets, clear, and streaming reuse. A review finding fixed duplicate cached-payload allocation by sharing immutable serialized answers between cache entries and flights.
 
 The live benchmark's request budgets are checked atomically before forwarding. No retries. The harness drains active relay calls before collecting statistics, records the extension binary hash, and separates execution success from accuracy. Fixtures are 12 synthetic templates, configuration order is fixed, and transport connections are reused; timing/accuracy is illustrative, not a production generalization claim.
+
+## Cache safety regression follow-up
+
+Added explicit default-off cross-query coverage and regressions for exact confidence preservation (confidence differs from winning probability), JSON type distinctions/canonical object order, criterion-description changes, score-level ordering, threshold reuse, warm-cache external-access enforcement, settings invalidation, connection close, provider 429 failures, and independent query/connection cache budgets.
+
+Validation: 102 deterministic tests passed; two opt-in live tests skipped. Lint/type checks passed. The independent reviewer ran all 28 connection-cache tests and found no blockers. This follow-up made no paid API calls and changed no native implementation.

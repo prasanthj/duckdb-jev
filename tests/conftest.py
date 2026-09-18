@@ -78,6 +78,8 @@ class Stub:
                                 "legend": {str(i): item for i, item in enumerate(criteria)},
                                 "probabilities": {str(i): 0.5 if i < 2 else 0.0 for i in range(len(criteria))},
                             }
+                        if owner.mode == "distinct_confidence" and kind != "noul":
+                            answer["confidence"] = 0.73
                         if owner.mode == "large_answers":
                             answer["extra"] = "x" * (1024 * 1024)
                         answers[key] = answer
