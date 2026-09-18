@@ -124,3 +124,9 @@ Independent review found no blocking issues in atomic in-flight sharing, publish
 The reviewer independently passed the initial 25 streaming/performance tests. An expanded run passed 44 cases but loaded an older native artifact during a rebuild and failed the new streaming model-name check; both model-name cases then passed in a fresh process after the build. The primary run passed all 74 regression tests against the final rebuilt artifact. A separate real TypeSafe streaming smoke passed using one request with two rows. Lint and type checks passed.
 
 The earlier concurrent-miss and missing-streaming limitations above describe historical revisions, now superseded. In-flight admission can still bypass coalescing beyond its 4096-key/8MiB key budget. Streaming input has one producer; HTTP requests remain concurrent. Native support does not imply Wasm support.
+
+## Follow-up review: connection TTL cache and live measurements
+
+Independent cache/query-cache/streaming review and 52 regression tests passed. No blockers remain. Verified model/endpoint/credential invalidation, connection isolation, non-sliding TTL, LRU eviction, budgets, clear, and streaming reuse. A review finding fixed duplicate cached-payload allocation by sharing immutable serialized answers between cache entries and flights.
+
+The live benchmark's request budgets are checked atomically before forwarding. No retries. The harness drains active relay calls before collecting statistics, records the extension binary hash, and separates execution success from accuracy. Fixtures are 12 synthetic templates, configuration order is fixed, and transport connections are reused; timing/accuracy is illustrative, not a production generalization claim.

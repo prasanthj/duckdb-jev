@@ -237,7 +237,7 @@ struct StreamState : LocalTableFunctionState {
         while (row->flight->future.wait_for(std::chrono::milliseconds(20)) !=
                std::future_status::ready)
           Check();
-        auto answer = Json::parse(row->flight->future.get());
+        auto answer = Json::parse(*row->flight->future.get());
         Check();
         output.SetValue(1, count, JsonValue(answer["answers"]));
         output.SetValue(2, count, Value(answer["model"].get<string>()));

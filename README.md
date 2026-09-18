@@ -106,9 +106,25 @@ Allowed ranges: batch 1–1000, concurrency 1–10, request bytes 256–1048576,
 
 `cache_hit` means reuse within the current chunk or sharing an in-flight/completed evaluation in the **same query**. The query cache defaults to 8MiB of serialized keys and results, with at most 4096 entries. Set `jev_cache_bytes=0` to disable cross-chunk reuse (chunk deduplication remains), or choose a budget up to 64MiB. When full, new entries bypass the cache; results remain complete. These limits bound retained serialized data and entry count, not total RSS. Simultaneous misses share an in-flight result within the same query. The in-flight registry is separately bounded to 4096 keys and 8MiB of serialized key bytes; above that bound, requests proceed independently. Disabling the completed-result cache does not disable in-flight sharing.
 
-Results and the configuration/key snapshot are cleared at query end, including errors/cancellation. Prepared-statement executions and statements inside a transaction get separate caches. No disk cache exists. Repeated queries intentionally call the service again; this avoids stale `jev-latest` and cross-account cache reuse. `LIMIT` does not guarantee an exact number of calls because SQL operates in chunks. Materialize deterministic candidate rows before inference when bounding spend matters. Rollback cannot undo API charges.
+Query results and the configuration/key snapshot are cleared at query end, including errors/cancellation. Prepared-statement executions and statements inside a transaction get separate caches. No disk cache exists. By default repeated queries call the service again; cross-query reuse requires the explicit connection-cache opt-in below. `LIMIT` does not guarantee an exact number of calls because SQL operates in chunks. Materialize deterministic candidate rows before inference when bounding spend matters. Rollback cannot undo API charges.
 
 Provider failures raise a query error, never FALSE or a low-confidence prediction. Timeout, malformed output, missing/extra answers, invalid choices/probabilities and HTTP errors fail closed with sanitized messages. Cancellation stops further scheduled work and interrupts transfers; requests already accepted remotely may still be billable. `EXPLAIN` makes no calls; `EXPLAIN ANALYZE` executes.
+
+## Repeated queries and persisted reuse
+
+```sql
+-- Opt-in, per connection; disabled by default.
+SET jev_session_cache_bytes = 8388608;  -- 8MiB, maximum 64MiB / 4096 entries
+SET jev_session_cache_ttl_ms = 60000;   -- non-sliding TTL; maximum 24 hours
+-- Run the same enrichment again: validated rows can return with no HTTP call.
+SELECT jev_cache_clear();              -- clear connection LRU, as a separate statement
+```
+
+The connection LRU stores each canonical evidence/question judgment independently of batching. It retains only validated successful answers, with original model and confidence. Changing model, endpoint, credentials, cache budget or TTL invalidates the LRU on the next Jev evaluation. Its scope is a SHA-256 fingerprint; credentials are not retained in cache keys or written to disk. It is isolated per DuckDB connection, not a distributed tenant cache. TTL starts when a result is stored and cache reads do not extend it. Cache payloads are shared immutably between matching rows rather than copied for every pending row. Limits count retained serialized keys/results and entries, not total RSS.
+
+`jev_cache_clear()` clears the connection LRU only; use it between enrichment queries. Already running query work can produce new entries. A model alias such as `jev-latest` may change before TTL expiration: pin a model version for reproducibility or use a short TTL. Closing the connection drops the cache.
+
+For reuse across processes, export validated enrichment to Parquet with an input fingerprint, enrichment-spec fingerprint, model, confidence, and creation/expiry metadata. Join against it before running inference and send only misses/stale rows. `benchmarks.live_cache` demonstrates a Parquet join in a fresh connection without loading the extension. The exported result remains customer data and should stay in the appropriate account's storage. Distributed AIDNN caching is outside this implementation.
 
 ## Streaming relational input
 
@@ -140,11 +156,20 @@ uv run python -m benchmarks.stream
 uv run python -m benchmarks.run --rows 1000 --repeats 3 --delay-ms 0
 ```
 
-The benchmark starts only a local deterministic HTTP server and saves manifest, per-trial data, summaries and a report under `benchmarks/results/<timestamp>/`. It covers batch sizes 1/25/100 and concurrency 1/4/10 by default. These are extension/HTTP measurements, **not Jev latency or semantic accuracy claims**. See [benchmark results](docs/benchmark-results.md) and the [independent performance review](docs/performance-review.md).
+The benchmark starts only a local deterministic HTTP server and saves manifest, per-trial data, summaries and a report under `benchmarks/results/<timestamp>/`. It covers batch sizes 1/25/100 and concurrency 1/4/10 by default. These are extension/HTTP measurements, **not Jev latency or semantic accuracy claims**. See [real Jev results](docs/live-results.md), [local benchmark results](docs/benchmark-results.md) and the [independent performance review](docs/performance-review.md).
 
 Tests cover all primitives, mixed questions, constant/dictionary/flat vectors, nested nulls, multiple chunks, connection reuse, byte caps, oversized expanded payloads, response order, concurrency across connections, scheduler fairness, cancellation, timeout, queued failures, malformed outputs, query-cache budgets, statement/connection isolation, prepared execution, and cross-expression reuse.
 
 Two explicitly opt-in tests contact TypeSafe: one scalar request with three questions and one streaming request with two rows (five questions total):
+
+For measured live runs (billable, explicitly bounded, no retries):
+
+```sh
+uv run python -m benchmarks.live --live
+uv run python -m benchmarks.live_cache --live
+```
+
+The first run caps itself at 1500 HTTP requests / 12000 questions by default. It saves inputs, outputs, per-request timing/usage, per-query results and summaries. The second caps at 40 requests / 800 questions and compares first runs, cached repeats, and offline Parquet reuse. Both read `TYPESAFE_API_KEY` only. Timing includes the loopback instrumentation relay; it is not a pure provider-internal latency measure.
 
 ```sh
 JEV_RUN_LIVE=1 uv run pytest -q tests/test_live.py
@@ -154,7 +179,7 @@ The scalar test saves its small response to `benchmarks/results/live-smoke.json`
 
 ## Current limits
 
-This is a working local native extension, not a signed/published community extension. No automatic discovery of tables, cross-query persistent cache, DuckDB secret-provider integration, request-usage SQL metrics relation, or automatic retries have been added. The [original design](docs/design.md) is a proposal; this README describes what is implemented. Scalar functions remain synchronous per chunk. Use `jev_stream` for bounded input prefetch, cross-chunk request packing, and overlapping HTTP work. Stub tests prove transport/mapping correctness, not model equivalence across all batch sizes; the small live smoke confirms protocol compatibility only.
+This is a working local native extension, not a signed/published community extension. No automatic discovery of tables, shared or disk-backed cache, DuckDB secret-provider integration, request-usage SQL metrics relation, or automatic retries have been added. The [original design](docs/design.md) is a proposal; this README describes what is implemented. Scalar functions remain synchronous per chunk. Use `jev_stream` for bounded input prefetch, cross-chunk request packing, and overlapping HTTP work. Stub tests prove transport/mapping correctness, not model equivalence across all batch sizes; the small live smoke confirms protocol compatibility only.
 
 
 The current artifact targets native DuckDB, not DuckDB-Wasm. A Wasm port requires a matching Wasm extension build plus browser-compatible transport, scheduling, and credentials. See [DuckDB-Wasm extension documentation](https://duckdb.org/docs/current/clients/wasm/extensions).

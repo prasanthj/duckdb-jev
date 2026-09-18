@@ -8,6 +8,7 @@
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "json.hpp"
+#include "mbedtls_wrapper.hpp"
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -17,6 +18,7 @@
 #include <deque>
 #include <functional>
 #include <future>
+#include <list>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -157,7 +159,8 @@ static Value Setting(ClientContext &ctx, const string &name) {
 }
 struct Options {
   string model, endpoint, key;
-  size_t questions, bytes, cache_bytes;
+  size_t questions, bytes, cache_bytes, session_bytes;
+  int64_t session_ttl;
   unsigned concurrency;
   long timeout;
 };
@@ -194,6 +197,15 @@ static Options ReadOptions(ClientContext &ctx) {
   auto cache = Setting(ctx, "jev_cache_bytes").GetValue<int64_t>();
   if (cache < 0 || cache > 64 * 1024 * 1024)
     Fail("jev_cache_bytes must be between zero and 64MiB");
+  const auto session_bytes =
+      Setting(ctx, "jev_session_cache_bytes").GetValue<int64_t>();
+  const auto session_ttl =
+      Setting(ctx, "jev_session_cache_ttl_ms").GetValue<int64_t>();
+  if (session_bytes < 0 || session_bytes > 64 * 1024 * 1024 ||
+      session_ttl < 1 || session_ttl > 86400000)
+    Fail("invalid session cache settings (bytes 0-64MiB, TTL 1-86400000ms)");
+  o.session_bytes = session_bytes;
+  o.session_ttl = session_ttl;
   o.cache_bytes = cache;
   o.questions = q;
   o.bytes = b;
@@ -202,27 +214,85 @@ static Options ReadOptions(ClientContext &ctx) {
   o.key = Key();
   return o;
 }
-// QueryEnd clears both credentials/configuration and cached results. Sharing
-// the context state lets separate expressions and parallel workers reuse
-// completed results without holding a lock across network I/O.
+// QueryEnd clears the configuration/key snapshot and query results; the opt-in
+// connection LRU survives. Shared context state reuses completed results across
+// expressions/workers without holding a lock across network I/O.
 struct Flight {
   string key;
-  std::promise<string> promise;
-  std::shared_future<string> future = promise.get_future().share();
+  std::promise<std::shared_ptr<const string>> promise;
+  std::shared_future<std::shared_ptr<const string>> future =
+      promise.get_future().share();
   bool done = false; // Only the owning evaluation writes this field.
 };
 class QueryState : public ClientContextState {
   std::mutex mutex;
   std::optional<Options> options;
-  std::unordered_map<string, string> answers;
+  std::unordered_map<string, std::shared_ptr<const string>> answers;
   size_t bytes = 0, flight_bytes = 0;
   std::unordered_map<string, std::shared_ptr<Flight>> flights;
+  struct SessionEntry {
+    std::shared_ptr<const string> encoded;
+    std::chrono::steady_clock::time_point expires;
+    std::list<string>::iterator position;
+    size_t bytes;
+  };
+  std::unordered_map<string, SessionEntry> session;
+  std::list<string> lru;
+  string session_scope;
+  size_t session_bytes = 0, session_budget = 0;
+  int64_t session_ttl = 0;
+  void ClearSessionLocked() {
+    session.clear();
+    lru.clear();
+    session_bytes = 0;
+  }
+  void EraseSession(std::unordered_map<string, SessionEntry>::iterator it) {
+    session_bytes -= it->second.bytes;
+    lru.erase(it->second.position);
+    session.erase(it);
+  }
+  void StoreSession(const string &key,
+                    const std::shared_ptr<const string> &encoded) {
+    // Account for both retained key copies (map + LRU), not object overhead.
+    const size_t size = key.size() * 2 + encoded->size();
+    if (!session_budget || size > session_budget)
+      return;
+    auto old = session.find(key);
+    if (old != session.end())
+      EraseSession(old);
+    while (!session.empty() &&
+           (session.size() >= 4096 || size > session_budget - session_bytes))
+      EraseSession(session.find(lru.back()));
+    lru.push_front(key);
+    try {
+      session.emplace(key,
+                      SessionEntry{encoded,
+                                   std::chrono::steady_clock::now() +
+                                       std::chrono::milliseconds(session_ttl),
+                                   lru.begin(), size});
+    } catch (...) {
+      lru.pop_front();
+      throw;
+    }
+    session_bytes += size;
+  }
 
 public:
   Options Snapshot(ClientContext &ctx) {
     std::lock_guard<std::mutex> lock(mutex);
-    if (!options)
+    if (!options) {
       options = ReadOptions(ctx);
+      const auto scope = duckdb_mbedtls::MbedTlsWrapper::ComputeSha256Hash(
+          Json::array(
+              {"jev-cache-v1", options->endpoint, options->model, options->key})
+              .dump());
+      if (scope != session_scope || session_budget != options->session_bytes ||
+          session_ttl != options->session_ttl)
+        ClearSessionLocked();
+      session_scope = scope;
+      session_budget = options->session_bytes;
+      session_ttl = options->session_ttl;
+    }
     return *options;
   }
   std::pair<std::shared_ptr<Flight>, bool> Acquire(const string &key) {
@@ -233,6 +303,23 @@ public:
       f->promise.set_value(cached->second);
       f->done = true;
       return {f, false};
+    }
+    auto saved = session.find(key);
+    if (saved != session.end()) {
+      if (std::chrono::steady_clock::now() >= saved->second.expires) {
+        EraseSession(saved);
+      } else {
+        lru.splice(lru.begin(), lru, saved->second.position);
+        auto f = std::make_shared<Flight>();
+        const size_t size = key.size() + saved->second.encoded->size();
+        if (answers.size() < 4096 && size <= options->cache_bytes - bytes) {
+          answers.emplace(key, saved->second.encoded);
+          bytes += size;
+        }
+        f->promise.set_value(saved->second.encoded);
+        f->done = true;
+        return {f, false};
+      }
     }
     auto found = flights.find(key);
     if (found != flights.end())
@@ -255,8 +342,9 @@ public:
   }
   void Complete(const std::shared_ptr<Flight> &f, const Json &value,
                 size_t budget) {
-    Store(f->key, value, budget);
-    f->promise.set_value(value.dump());
+    auto encoded = std::make_shared<const string>(value.dump());
+    Store(f->key, encoded, budget);
+    f->promise.set_value(encoded);
     f->done = true;
     Release(f);
   }
@@ -268,17 +356,21 @@ public:
       Release(f);
     }
   }
-  void Store(const string &key, const Json &value, size_t budget) {
-    if (!budget)
-      return;
-    string encoded = value.dump();
-    const size_t size = key.size() + encoded.size();
+  void Store(const string &key, const std::shared_ptr<const string> &encoded,
+             size_t budget) {
+    const size_t size = key.size() + encoded->size();
     std::lock_guard<std::mutex> lock(mutex);
+    StoreSession(key, encoded);
     // Serialized byte budget plus entry-count bound; not a total RSS limit.
-    if (answers.size() >= 4096 || size > budget - bytes || answers.count(key))
+    if (!budget || answers.size() >= 4096 || size > budget - bytes ||
+        answers.count(key))
       return;
-    answers.emplace(key, std::move(encoded));
+    answers.emplace(key, encoded);
     bytes += size;
+  }
+  void ClearSession() {
+    std::lock_guard<std::mutex> lock(mutex);
+    ClearSessionLocked();
   }
   void QueryEnd() override {
     std::lock_guard<std::mutex> lock(mutex);
@@ -306,7 +398,7 @@ static Json AwaitFlight(const std::shared_ptr<Flight> &flight,
          std::future_status::ready)
     if (ctx.IsInterrupted())
       Fail("query cancelled");
-  return Json::parse(flight->future.get());
+  return Json::parse(*flight->future.get());
 }
 struct Transfer {
   string body;
@@ -855,7 +947,25 @@ static LogicalType ReturnType(const string &name) {
 
 static void Load(ExtensionLoader &loader) {
   RegisterStream(loader);
+  ScalarFunction clear(
+      "jev_cache_clear", {}, LogicalType::BOOLEAN,
+      [](DataChunk &args, ExpressionState &state, Vector &result) {
+        auto cached = state.GetContext().registered_state->Get<QueryState>(
+            "jev_query_state");
+        if (cached)
+          cached->ClearSession();
+        for (idx_t r = 0; r < args.size(); r++)
+          result.SetValue(r, Value(true));
+      });
+  clear.stability = FunctionStability::VOLATILE;
+  loader.RegisterFunction(clear);
   auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
+  config.AddExtensionOption("jev_session_cache_bytes",
+                            "Opt-in connection LRU serialized byte budget",
+                            LogicalType::BIGINT, Value::BIGINT(0));
+  config.AddExtensionOption("jev_session_cache_ttl_ms",
+                            "Connection cache non-sliding TTL",
+                            LogicalType::BIGINT, Value::BIGINT(60000));
   config.AddExtensionOption(
       "jev_cache_bytes", "Query cache serialized byte budget (0 disables)",
       LogicalType::BIGINT, Value::BIGINT(8 * 1024 * 1024));
