@@ -26,4 +26,7 @@ def test_concurrency_limit(db: duckdb.DuckDBPyConnection, stub: Stub, concurrenc
 def test_repeated_rows_cache_scope(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
     rows = db.execute("SELECT jev_noul('same','p') FROM range(4097)").fetchall()
     assert len(rows) == 4097
-    assert len(stub.calls) == 3  # Intentionally chunk-local; no cross-query/model-alias stale cache.
+    assert len(stub.calls) == 1
+    assert sum(row[0]["cache_hit"] for row in rows) == 4096
+    db.execute("SELECT jev_noul('same','p')").fetchall()
+    assert len(stub.calls) == 2  # No reuse across statements.

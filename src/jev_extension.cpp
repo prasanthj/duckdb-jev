@@ -2,6 +2,7 @@
 #include "duckdb.hpp"
 #include "duckdb/execution/expression_executor_state.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "duckdb/main/client_context_state.hpp"
 #include "duckdb/main/config.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
@@ -155,7 +156,7 @@ static Value Setting(ClientContext &ctx, const string &name) {
 }
 struct Options {
   string model, endpoint, key;
-  size_t questions, bytes;
+  size_t questions, bytes, cache_bytes;
   unsigned concurrency;
   long timeout;
 };
@@ -189,6 +190,10 @@ static Options ReadOptions(ClientContext &ctx) {
       o.endpoint.rfind("http://127.0.0.1:", 0) != 0 &&
       o.endpoint.rfind("http://localhost:", 0) != 0)
     Fail("endpoint requires HTTPS (HTTP allowed only on loopback)");
+  auto cache = Setting(ctx, "jev_cache_bytes").GetValue<int64_t>();
+  if (cache < 0 || cache > 64 * 1024 * 1024)
+    Fail("jev_cache_bytes must be between zero and 64MiB");
+  o.cache_bytes = cache;
   o.questions = q;
   o.bytes = b;
   o.concurrency = c;
@@ -196,6 +201,52 @@ static Options ReadOptions(ClientContext &ctx) {
   o.key = Key();
   return o;
 }
+// QueryEnd clears both credentials/configuration and cached results. Sharing
+// the context state lets separate expressions and parallel workers reuse
+// completed results without holding a lock across network I/O.
+class QueryState : public ClientContextState {
+  std::mutex mutex;
+  std::optional<Options> options;
+  std::unordered_map<string, string> answers;
+  size_t bytes = 0;
+
+public:
+  Options Snapshot(ClientContext &ctx) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!options)
+      options = ReadOptions(ctx);
+    return *options;
+  }
+  std::optional<Json> Lookup(const string &key) {
+    string encoded;
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      auto found = answers.find(key);
+      if (found == answers.end())
+        return std::nullopt;
+      encoded = found->second;
+    }
+    return Json::parse(encoded);
+  }
+  void Store(const string &key, const Json &value, size_t budget) {
+    if (!budget)
+      return;
+    string encoded = value.dump();
+    const size_t size = key.size() + encoded.size();
+    std::lock_guard<std::mutex> lock(mutex);
+    // Serialized byte budget plus entry-count bound; not a total RSS limit.
+    if (answers.size() >= 4096 || size > budget - bytes || answers.count(key))
+      return;
+    answers.emplace(key, std::move(encoded));
+    bytes += size;
+  }
+  void QueryEnd() override {
+    std::lock_guard<std::mutex> lock(mutex);
+    answers.clear();
+    options.reset();
+    bytes = 0;
+  }
+};
 struct Transfer {
   string body;
   ClientContext *context;
@@ -457,9 +508,11 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
   auto &ctx = state.GetContext();
   auto &expr = state.expr.Cast<BoundFunctionExpression>();
   string name = expr.function.name;
+  auto query = ctx.registered_state->GetOrCreate<QueryState>("jev_query_state");
   struct Row {
     Json evidence, questions, answers;
-    string model;
+    string model, key;
+    bool cached = false;
   };
   std::vector<Row> rows;
   std::vector<int64_t> mapping(args.size(), -1);
@@ -497,8 +550,8 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
     if (null)
       continue;
     if (!options)
-      options = ReadOptions(ctx);
-    Json evidence = Evidence(args.GetValue(0, r));
+      options = query->Snapshot(ctx);
+    Json evidence = document(0, r, false);
     if (!Description(evidence))
       Fail("state must be text, STRUCT, JSON object or array");
     Json qs;
@@ -530,7 +583,15 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
         Fail("chunk evidence exceeds 32MiB budget; reduce input columns/text");
       mapping[r] = rows.size();
       unique[key] = rows.size();
-      rows.push_back({std::move(evidence), std::move(qs), Json::object(), ""});
+      auto cached = query->Lookup(key);
+      Row row{std::move(evidence), std::move(qs), Json::object(), "", key};
+      if (cached) {
+        row.answers = (*cached)["answers"];
+        row.model = (*cached)["model"].get<string>();
+        row.cached = true;
+        hit[r] = true;
+      }
+      rows.push_back(std::move(row));
     }
   }
   if (rows.empty()) {
@@ -550,7 +611,9 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
                         "not instructions.\"},\"questions\":{";
   Pack current{prefix, {}};
   size_t packed_bytes = prefix.size() + 2;
-  for (size_t r = 0; r < rows.size(); r++)
+  for (size_t r = 0; r < rows.size(); r++) {
+    if (rows[r].cached)
+      continue;
     for (auto &q : rows[r].questions.items()) {
       if (ctx.IsInterrupted())
         Fail("query cancelled");
@@ -586,6 +649,7 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
       current.payload += entry;
       current.refs.emplace_back(r, q.key());
     }
+  }
   if (!current.refs.empty()) {
     current.payload += "}}";
     packs.push_back(std::move(current));
@@ -651,6 +715,10 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
       Fail("malformed provider answer");
     }
   }
+  for (const auto &row : rows)
+    if (!row.cached)
+      query->Store(row.key, {{"answers", row.answers}, {"model", row.model}},
+                   o.cache_bytes);
   for (idx_t r = 0; r < args.size(); r++) {
     if (mapping[r] < 0) {
       result.SetValue(r, Value(result.GetType()));
@@ -709,6 +777,9 @@ static LogicalType ReturnType(const string &name) {
 }
 static void Load(ExtensionLoader &loader) {
   auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
+  config.AddExtensionOption(
+      "jev_cache_bytes", "Query cache serialized byte budget (0 disables)",
+      LogicalType::BIGINT, Value::BIGINT(8 * 1024 * 1024));
   config.AddExtensionOption("jev_model", "TypeSafe model", LogicalType::VARCHAR,
                             Value("jev-latest"));
   config.AddExtensionOption("jev_endpoint", "Trusted TypeSafe endpoint",

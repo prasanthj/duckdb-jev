@@ -10,3 +10,7 @@ Implementation is now available; see README.md for the exact implemented surface
 6. Performance and packaging: cold and warm HTTP, explicit no-cache/cache cases, single-row and packed requests, independent concurrency 1/4/10, token usage and wall time. Compare batch-size invariance and neighboring-row contamination. Report p50/p95 per request plus total query duration, not amortized per-row latency. Build macOS arm64 and Linux amd64 release-specific artifacts first; unsigned local loading only for development. Community distribution/signing is a later release step, not automatic publication.
 
 Useful AIDNN fixtures: support sentiment and renewal risk; closed-taxonomy intent classification; evidence verification; entity resolution over pre-retrieved KB candidate IDs. Keep these separate from function-correctness tests. A successful SQL function is not evidence that every semantic classification is correct.
+
+## Follow-up: bounded query reuse
+
+Implemented completed-result memoization shared by expressions/workers within a query, with QueryEnd cleanup and a first-use configuration snapshot. Defaults: 8MiB serialized keys/results, 4096 entries; overflow bypasses insertion. Constant evidence is converted once per chunk. Concurrent misses are not coalesced. Streaming cross-chunk pipelining remains a separate operator/table-function design; synchronous scalar callbacks cannot return before filling their output vectors.

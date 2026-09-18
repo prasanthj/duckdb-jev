@@ -107,3 +107,12 @@ verify successful subsequent queries. Tests use only the local HTTP fixture.
 - Correct request isolation on the wire is not proof of semantic batch-size
   invariance. A separately budgeted live corpus is needed to compare decisions
   with different neighboring rows and batch sizes.
+
+
+## Follow-up review: query-scoped memoization
+
+A fresh independent reviewer inspected the query-cache change after baseline commit `28afbd1`. No blocking findings. The reviewer independently ran 49 tests, plus additional saturated-cache and parallel physical-table scan checks. Those scenarios are now included in `tests/test_query_cache.py`.
+
+Verified design: ClientContext state shares completed results across expressions and chunks, clears answers and configuration/key snapshot at QueryEnd, uses serialized-key/result and entry-count caps, and never holds the cache mutex over network I/O. Separate prepared executions and statements inside transactions do not share results.
+
+Remaining limits: concurrent cold misses can issue duplicate requests; no in-flight coalescing. The scalar callback remains synchronous, so this change does not provide cross-chunk streaming/pipelining. Cache limits are serialized-data limits, not total RSS limits.

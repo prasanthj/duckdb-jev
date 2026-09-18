@@ -85,7 +85,7 @@ See [renewal.sql](examples/renewal.sql) for a realistic multi-question account w
 
 ## Batching and concurrency
 
-The scalar functions process DuckDB chunks. They respect validity/selection vectors, deduplicate identical evidence and questions within a chunk, pack questions into byte/count-bounded HTTP requests, and reassemble answers by IDs regardless of completion order. Constant instructions/criteria are parsed once per chunk. Payload packing uses incremental byte accounting rather than repeatedly copying/serializing a growing request.
+The scalar functions process DuckDB chunks. They respect validity/selection vectors, deduplicate identical evidence and questions within a chunk, pack questions into byte/count-bounded HTTP requests, and reassemble answers by IDs regardless of completion order. Constant evidence/instructions/criteria are converted once per chunk. Completed results are also reused across chunks and expressions within the same query. Payload packing uses incremental byte accounting rather than repeatedly copying/serializing a growing request.
 
 A persistent 10-worker pool reuses CURL connection caches across chunks. The scheduler admits tasks only when their connection's concurrency limit permits, so a concurrency-1 query does not occupy all workers with waiting tasks. At most 10 requests run across the process. No automatic retries.
 
@@ -100,11 +100,13 @@ SET jev_timeout_ms = 30000;
 SET jev_batch_size = 1;
 ```
 
-`jev_endpoint` is a trusted session setting, defaulting to `https://api.typesafe.ai/v1/systemone`. HTTPS is required except for localhost/127.0.0.1 test servers. Redirect following is disabled. Unknown options fail through DuckDB. Settings are read for each execution chunk; don't mutate the same connection concurrently during a query.
+`jev_endpoint` is a trusted session setting, defaulting to `https://api.typesafe.ai/v1/systemone`. HTTPS is required except for localhost/127.0.0.1 test servers. Redirect following is disabled. Unknown options fail through DuckDB. Settings and the environment key are snapshotted at the first non-null Jev evaluation in each query; don't mutate the same connection concurrently during a query.
 
 Allowed ranges: batch 1–1000, concurrency 1–10, request bytes 256–1048576, timeout 1–300000ms. These are **extension controls**, not claims about Jev limits. The byte cap is not a tokenizer and cannot guarantee fitting the model context. Oversized evidence fails without truncation. Unique serialized chunk input and expanded packed payload each have separate 32MiB caps; total process RSS includes other objects and is higher.
 
-`cache_hit` means duplicate input reuse **within that chunk only**. No query-wide or disk cache exists yet. Repeated queries intentionally call the service again; this avoids stale `jev-latest` and cross-account cache reuse. `LIMIT` does not guarantee an exact number of calls because SQL operates in chunks. Materialize deterministic candidate rows before inference when bounding spend matters. Rollback cannot undo API charges.
+`cache_hit` means reuse within the current chunk or from an earlier completed evaluation in the **same query**. The query cache defaults to 8MiB of serialized keys and results, with at most 4096 entries. Set `jev_cache_bytes=0` to disable cross-chunk reuse (chunk deduplication remains), or choose a budget up to 64MiB. When full, new entries bypass the cache; results remain complete. These limits bound retained serialized data and entry count, not total RSS. Concurrent misses can still issue duplicate requests; there is no in-flight coalescing.
+
+Results and the configuration/key snapshot are cleared at query end, including errors/cancellation. Prepared-statement executions and statements inside a transaction get separate caches. No disk cache exists. Repeated queries intentionally call the service again; this avoids stale `jev-latest` and cross-account cache reuse. `LIMIT` does not guarantee an exact number of calls because SQL operates in chunks. Materialize deterministic candidate rows before inference when bounding spend matters. Rollback cannot undo API charges.
 
 Provider failures raise a query error, never FALSE or a low-confidence prediction. Timeout, malformed output, missing/extra answers, invalid choices/probabilities and HTTP errors fail closed with sanitized messages. Cancellation stops further scheduled work and interrupts transfers; requests already accepted remotely may still be billable. `EXPLAIN` makes no calls; `EXPLAIN ANALYZE` executes.
 
@@ -118,7 +120,7 @@ uv run python -m benchmarks.run --rows 1000 --repeats 3 --delay-ms 0
 
 The benchmark starts only a local deterministic HTTP server and saves manifest, per-trial data, summaries and a report under `benchmarks/results/<timestamp>/`. It covers batch sizes 1/25/100 and concurrency 1/4/10 by default. These are extension/HTTP measurements, **not Jev latency or semantic accuracy claims**. See [benchmark results](docs/benchmark-results.md) and the [independent performance review](docs/performance-review.md).
 
-Tests cover all primitives, mixed questions, constant/dictionary/flat vectors, nested nulls, multiple chunks, connection reuse, byte caps, oversized expanded payloads, response order, concurrency across connections, scheduler fairness, cancellation, timeout, queued failures, and malformed outputs.
+Tests cover all primitives, mixed questions, constant/dictionary/flat vectors, nested nulls, multiple chunks, connection reuse, byte caps, oversized expanded payloads, response order, concurrency across connections, scheduler fairness, cancellation, timeout, queued failures, malformed outputs, query-cache budgets, statement/connection isolation, prepared execution, and cross-expression reuse.
 
 One explicitly opt-in test contacts TypeSafe with three questions in one request:
 
@@ -130,4 +132,4 @@ It saves the small response to `benchmarks/results/live-smoke.json`. It is skipp
 
 ## Current limits
 
-This is a working local native extension, not a signed/published community extension. No automatic discovery of tables, query-wide persistent cache, DuckDB secret-provider integration, request-usage SQL metrics relation, automatic retries, or streaming table function has been added. The [original design](docs/design.md) is a proposal; this README describes what is implemented. Large relational scans are vectorized chunk-by-chunk; cross-chunk pipelining within a single serial scan is not yet implemented. Stub tests prove transport/mapping correctness, not model equivalence across all batch sizes; the small live smoke confirms protocol compatibility only.
+This is a working local native extension, not a signed/published community extension. No automatic discovery of tables, cross-query persistent cache, DuckDB secret-provider integration, request-usage SQL metrics relation, automatic retries, or streaming table function has been added. The [original design](docs/design.md) is a proposal; this README describes what is implemented. Large relational scans are vectorized chunk-by-chunk; cross-chunk pipelining within a single serial scan is not yet implemented. Stub tests prove transport/mapping correctness, not model equivalence across all batch sizes; the small live smoke confirms protocol compatibility only.
