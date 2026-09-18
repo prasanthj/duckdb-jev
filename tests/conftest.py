@@ -34,6 +34,12 @@ class Stub:
                 super().setup()
                 self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
+            def handle_one_request(self) -> None:
+                try:
+                    super().handle_one_request()
+                except ConnectionResetError:
+                    self.close_connection = True  # Expected after native cancellation.
+
             def log_message(self, format: str, *args: Any) -> None:
                 pass
 
@@ -72,13 +78,15 @@ class Stub:
                                 "legend": {str(i): item for i, item in enumerate(criteria)},
                                 "probabilities": {str(i): 0.5 if i < 2 else 0.0 for i in range(len(criteria))},
                             }
+                        if owner.mode == "large_answers":
+                            answer["extra"] = "x" * (1024 * 1024)
                         answers[key] = answer
                     if owner.mode == "missing":
                         answers.pop(next(iter(answers)))
                     if owner.mode == "range":
                         next(iter(answers.values()))["noul"] = 1.5
                     result = {
-                        "model": "jev-stub-pinned",
+                        "model": "x" * 1025 if owner.mode == "large_model" else "jev-stub-pinned",
                         "answers": answers,
                         "usage": {"input_tokens": 10, "output_tokens": 5},
                     }

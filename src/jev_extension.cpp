@@ -1,6 +1,7 @@
 #define DUCKDB_EXTENSION_MAIN
 #include "duckdb.hpp"
 #include "duckdb/execution/expression_executor_state.hpp"
+#include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/client_context_state.hpp"
 #include "duckdb/main/config.hpp"
@@ -204,11 +205,18 @@ static Options ReadOptions(ClientContext &ctx) {
 // QueryEnd clears both credentials/configuration and cached results. Sharing
 // the context state lets separate expressions and parallel workers reuse
 // completed results without holding a lock across network I/O.
+struct Flight {
+  string key;
+  std::promise<string> promise;
+  std::shared_future<string> future = promise.get_future().share();
+  bool done = false; // Only the owning evaluation writes this field.
+};
 class QueryState : public ClientContextState {
   std::mutex mutex;
   std::optional<Options> options;
   std::unordered_map<string, string> answers;
-  size_t bytes = 0;
+  size_t bytes = 0, flight_bytes = 0;
+  std::unordered_map<string, std::shared_ptr<Flight>> flights;
 
 public:
   Options Snapshot(ClientContext &ctx) {
@@ -217,16 +225,48 @@ public:
       options = ReadOptions(ctx);
     return *options;
   }
-  std::optional<Json> Lookup(const string &key) {
-    string encoded;
-    {
-      std::lock_guard<std::mutex> lock(mutex);
-      auto found = answers.find(key);
-      if (found == answers.end())
-        return std::nullopt;
-      encoded = found->second;
+  std::pair<std::shared_ptr<Flight>, bool> Acquire(const string &key) {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto cached = answers.find(key);
+    if (cached != answers.end()) {
+      auto f = std::make_shared<Flight>();
+      f->promise.set_value(cached->second);
+      f->done = true;
+      return {f, false};
     }
-    return Json::parse(encoded);
+    auto found = flights.find(key);
+    if (found != flights.end())
+      return {found->second, false};
+    auto f = std::make_shared<Flight>();
+    f->key = key;
+    if (flights.size() < 4096 && key.size() <= 8 * 1024 * 1024 - flight_bytes) {
+      flights.emplace(key, f);
+      flight_bytes += key.size();
+    }
+    return {f, true};
+  }
+  void Release(const std::shared_ptr<Flight> &f) {
+    std::lock_guard<std::mutex> lock(mutex);
+    auto it = flights.find(f->key);
+    if (it != flights.end() && it->second == f) {
+      flight_bytes -= f->key.size();
+      flights.erase(it);
+    }
+  }
+  void Complete(const std::shared_ptr<Flight> &f, const Json &value,
+                size_t budget) {
+    Store(f->key, value, budget);
+    f->promise.set_value(value.dump());
+    f->done = true;
+    Release(f);
+  }
+  void Abandon(const std::shared_ptr<Flight> &f) {
+    if (!f->done) {
+      f->promise.set_exception(std::make_exception_ptr(
+          InvalidInputException("jev: owning evaluation failed")));
+      f->done = true;
+      Release(f);
+    }
   }
   void Store(const string &key, const Json &value, size_t budget) {
     if (!budget)
@@ -243,10 +283,31 @@ public:
   void QueryEnd() override {
     std::lock_guard<std::mutex> lock(mutex);
     answers.clear();
+    flights.clear();
+    flight_bytes = 0;
     options.reset();
     bytes = 0;
   }
 };
+struct FlightGuard {
+  QueryState &query;
+  std::vector<std::shared_ptr<Flight>> owned;
+  explicit FlightGuard(QueryState &q, size_t size) : query(q) {
+    owned.reserve(size);
+  }
+  ~FlightGuard() {
+    for (auto &f : owned)
+      query.Abandon(f);
+  }
+};
+static Json AwaitFlight(const std::shared_ptr<Flight> &flight,
+                        ClientContext &ctx) {
+  while (flight->future.wait_for(std::chrono::milliseconds(20)) !=
+         std::future_status::ready)
+    if (ctx.IsInterrupted())
+      Fail("query cancelled");
+  return Json::parse(flight->future.get());
+}
 struct Transfer {
   string body;
   ClientContext *context;
@@ -492,6 +553,12 @@ static void ValidateAnswer(const Json &a, const Json &q) {
         Fail("score legend mismatch");
   }
 }
+static bool ValidModel(const Json &response) {
+  if (!response.contains("model") || !response["model"].is_string())
+    return false;
+  const auto &model = response["model"].get_ref<const string &>();
+  return !model.empty() && model.size() <= 1024;
+}
 static Value JsonValue(const Json &j) {
   return Value(j.dump()).DefaultCastAs(LogicalType::JSON());
 }
@@ -513,8 +580,10 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
     Json evidence, questions, answers;
     string model, key;
     bool cached = false;
+    std::shared_ptr<Flight> flight;
   };
   std::vector<Row> rows;
+  FlightGuard guard(*query, args.size());
   std::vector<int64_t> mapping(args.size(), -1);
   std::vector<bool> hit(args.size(), false);
   std::unordered_map<string, size_t> unique;
@@ -583,14 +652,13 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
         Fail("chunk evidence exceeds 32MiB budget; reduce input columns/text");
       mapping[r] = rows.size();
       unique[key] = rows.size();
-      auto cached = query->Lookup(key);
+      auto claim = query->Acquire(key);
+      if (claim.second)
+        guard.owned.push_back(claim.first);
       Row row{std::move(evidence), std::move(qs), Json::object(), "", key};
-      if (cached) {
-        row.answers = (*cached)["answers"];
-        row.model = (*cached)["model"].get<string>();
-        row.cached = true;
-        hit[r] = true;
-      }
+      row.flight = claim.first;
+      row.cached = !claim.second;
+      hit[r] = row.cached;
       rows.push_back(std::move(row));
     }
   }
@@ -667,9 +735,8 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
         Fail("curl allocation failed");
       auto &pack = packs[i];
       auto response = Request(curl, pack.payload, o, ctx, stopped);
-      if (!response.is_object() || !response.contains("model") ||
-          !response["model"].is_string() || !response.contains("answers") ||
-          !response["answers"].is_object() ||
+      if (!response.is_object() || !ValidModel(response) ||
+          !response.contains("answers") || !response["answers"].is_object() ||
           response["answers"].size() != pack.refs.size())
         Fail("invalid provider response");
       std::lock_guard<std::mutex> lock(results_mutex);
@@ -715,10 +782,19 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
       Fail("malformed provider answer");
     }
   }
+  // Publish every owned row before waiting: parallel chunks can own opposite
+  // subsets of the same keys. Waiting first would create a dependency cycle.
   for (const auto &row : rows)
     if (!row.cached)
-      query->Store(row.key, {{"answers", row.answers}, {"model", row.model}},
-                   o.cache_bytes);
+      query->Complete(row.flight,
+                      {{"answers", row.answers}, {"model", row.model}},
+                      o.cache_bytes);
+  for (auto &row : rows)
+    if (row.cached) {
+      auto value = AwaitFlight(row.flight, ctx);
+      row.answers = value["answers"];
+      row.model = value["model"].get<string>();
+    }
   for (idx_t r = 0; r < args.size(); r++) {
     if (mapping[r] < 0) {
       result.SetValue(r, Value(result.GetType()));
@@ -775,7 +851,10 @@ static LogicalType ReturnType(const string &name) {
   fields.emplace_back("cache_hit", LogicalType::BOOLEAN);
   return LogicalType::STRUCT(fields);
 }
+#include "jev_stream.hpp"
+
 static void Load(ExtensionLoader &loader) {
+  RegisterStream(loader);
   auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
   config.AddExtensionOption(
       "jev_cache_bytes", "Query cache serialized byte budget (0 disables)",

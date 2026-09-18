@@ -42,3 +42,24 @@ def test_live_three_primitives() -> None:
         output.write_text(json.dumps({"model": result["model"], "answers": answers, "requests": 1}, indent=2) + "\n")
     finally:
         con.close()
+
+
+@pytest.mark.skipif(os.environ.get("JEV_RUN_LIVE") != "1", reason="Paid API smoke test is opt-in")
+def test_live_stream() -> None:
+    """One request, two independent rows, then stop."""
+    con = duckdb.connect(config={"allow_unsigned_extensions": True})
+    questions = {"refund": {"type": "noul", "instructions": "Does the text explicitly request a refund?"}}
+    try:
+        con.execute(f"LOAD '{EXTENSION}'")
+        rows = con.execute(
+            "SELECT * FROM jev_stream((SELECT id, message, ?::JSON FROM "
+            "(VALUES (1,'Please refund the duplicate charge.'), (2,'Thank you, everything works well.')) t(id,message))) "
+            "ORDER BY row_id",
+            [json.dumps(questions)],
+        ).fetchall()
+        assert len(rows) == 2
+        assert json.loads(rows[0][1])["refund"]["noul"] > 0.5
+        assert json.loads(rows[1][1])["refund"]["noul"] < 0.5
+        assert all(row[2] and not row[3] for row in rows)
+    finally:
+        con.close()

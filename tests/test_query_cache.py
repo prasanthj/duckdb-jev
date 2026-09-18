@@ -114,8 +114,8 @@ def test_parallel_scan_shared_state(db: duckdb.DuckDBPyConnection, stub: Stub) -
     ).fetchall()
     assert len(rows) == 500000
     assert all(value == (i % 10) / 10 for i, value in rows)
-    # Concurrent initial misses may race; completed answers are reused afterwards.
-    assert sum(len(call["body"]["questions"]) for call in stub.calls) <= 40
+    # Simultaneous cold misses share flights, then completed answers are reused.
+    assert sum(len(call["body"]["questions"]) for call in stub.calls) == 10
     before = len(stub.calls)
     db.execute("SELECT jev_noul({'i':0},'p')").fetchall()
     assert len(stub.calls) == before + 1

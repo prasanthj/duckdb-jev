@@ -14,3 +14,7 @@ Useful AIDNN fixtures: support sentiment and renewal risk; closed-taxonomy inten
 ## Follow-up: bounded query reuse
 
 Implemented completed-result memoization shared by expressions/workers within a query, with QueryEnd cleanup and a first-use configuration snapshot. Defaults: 8MiB serialized keys/results, 4096 entries; overflow bypasses insertion. Constant evidence is converted once per chunk. Concurrent misses are not coalesced. Streaming cross-chunk pipelining remains a separate operator/table-function design; synchronous scalar callbacks cannot return before filling their output vectors.
+
+## Follow-up: in-flight sharing and streaming
+
+Implemented query-local Flight promises with atomic cache/in-flight lookup, bounded admission, owner-failure propagation and publish-before-wait ordering. Implemented `jev_stream(TABLE)` as a native table-in/out operator with a single input producer, partial packs spanning chunks, concurrent HTTP jobs, ready-prefix output and explicit backpressure. Independent performance review and deterministic lifecycle/memory/batch tests cover this path.

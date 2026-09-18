@@ -22,3 +22,14 @@ p95 is across whole-query trials; with three trials it is only the maximum obser
 Independent review: [performance-review.md](performance-review.md). All runs use native code on macOS arm64, DuckDB1.5.5. These trials preceded the final expanded-payload memory guard; the guard does not alter batching decisions for these small fixtures.
 
 Functional batch invariance is tested against a deterministic stub, not established for arbitrary Jev judgments. Native live smoke: one request with Choice, Score and Noul passed; it does not support throughput claims.
+
+## Streaming comparison
+
+Reproduce with `uv run python -m benchmarks.stream`. Local HTTP stub only: 4097 unique rows, batch1000, concurrency10, 20ms simulated service delay, three trials/path, full result validation.
+
+| Path | HTTP requests | Median query seconds |
+|---|---:|---:|
+| Scalar chunks | 7 | 0.1217 |
+| Streaming | 5 | 0.0648 |
+
+The request-count reduction demonstrates cross-chunk packing. These timings do not measure live TypeSafe latency and do not promise production speedups. Raw results: `benchmarks/results/stream-20260918T060615962191Z/results.json` (local generated artifact, ignored by git).

@@ -116,3 +116,11 @@ A fresh independent reviewer inspected the query-cache change after baseline com
 Verified design: ClientContext state shares completed results across expressions and chunks, clears answers and configuration/key snapshot at QueryEnd, uses serialized-key/result and entry-count caps, and never holds the cache mutex over network I/O. Separate prepared executions and statements inside transactions do not share results.
 
 Remaining limits: concurrent cold misses can issue duplicate requests; no in-flight coalescing. The scalar callback remains synchronous, so this change does not provide cross-chunk streaming/pipelining. Cache limits are serialized-data limits, not total RSS limits.
+
+## Follow-up review: coalescing and streaming
+
+Independent review found no blocking issues in atomic in-flight sharing, publish-before-wait ordering, owner failure cleanup, cross-chunk partial packs, bounded work/results, ready-prefix output, finalization, cancellation and LIMIT cleanup. Review feedback added a separate 32MiB buffered-answer limit and a 1024-byte provider model-name limit.
+
+The reviewer independently passed the initial 25 streaming/performance tests. An expanded run passed 44 cases but loaded an older native artifact during a rebuild and failed the new streaming model-name check; both model-name cases then passed in a fresh process after the build. The primary run passed all 74 regression tests against the final rebuilt artifact. A separate real TypeSafe streaming smoke passed using one request with two rows. Lint and type checks passed.
+
+The earlier concurrent-miss and missing-streaming limitations above describe historical revisions, now superseded. In-flight admission can still bypass coalescing beyond its 4096-key/8MiB key budget. Streaming input has one producer; HTTP requests remain concurrent. Native support does not imply Wasm support.

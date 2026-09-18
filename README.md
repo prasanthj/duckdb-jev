@@ -104,16 +104,38 @@ SET jev_batch_size = 1;
 
 Allowed ranges: batch 1–1000, concurrency 1–10, request bytes 256–1048576, timeout 1–300000ms. These are **extension controls**, not claims about Jev limits. The byte cap is not a tokenizer and cannot guarantee fitting the model context. Oversized evidence fails without truncation. Unique serialized chunk input and expanded packed payload each have separate 32MiB caps; total process RSS includes other objects and is higher.
 
-`cache_hit` means reuse within the current chunk or from an earlier completed evaluation in the **same query**. The query cache defaults to 8MiB of serialized keys and results, with at most 4096 entries. Set `jev_cache_bytes=0` to disable cross-chunk reuse (chunk deduplication remains), or choose a budget up to 64MiB. When full, new entries bypass the cache; results remain complete. These limits bound retained serialized data and entry count, not total RSS. Concurrent misses can still issue duplicate requests; there is no in-flight coalescing.
+`cache_hit` means reuse within the current chunk or sharing an in-flight/completed evaluation in the **same query**. The query cache defaults to 8MiB of serialized keys and results, with at most 4096 entries. Set `jev_cache_bytes=0` to disable cross-chunk reuse (chunk deduplication remains), or choose a budget up to 64MiB. When full, new entries bypass the cache; results remain complete. These limits bound retained serialized data and entry count, not total RSS. Simultaneous misses share an in-flight result within the same query. The in-flight registry is separately bounded to 4096 keys and 8MiB of serialized key bytes; above that bound, requests proceed independently. Disabling the completed-result cache does not disable in-flight sharing.
 
 Results and the configuration/key snapshot are cleared at query end, including errors/cancellation. Prepared-statement executions and statements inside a transaction get separate caches. No disk cache exists. Repeated queries intentionally call the service again; this avoids stale `jev-latest` and cross-account cache reuse. `LIMIT` does not guarantee an exact number of calls because SQL operates in chunks. Materialize deterministic candidate rows before inference when bounding spend matters. Rollback cannot undo API charges.
 
 Provider failures raise a query error, never FALSE or a low-confidence prediction. Timeout, malformed output, missing/extra answers, invalid choices/probabilities and HTTP errors fail closed with sanitized messages. Cancellation stops further scheduled work and interrupts transfers; requests already accepted remotely may still be billable. `EXPLAIN` makes no calls; `EXPLAIN ANALYZE` executes.
 
+## Streaming relational input
+
+```sql
+SELECT row_id, answers, model, cache_hit
+FROM jev_stream((
+  SELECT
+    ticket_id,
+    {'message': message, 'account': account, 'telemetry': telemetry},
+    '{"sentiment":{"type":"score","instructions":"Assess the tone of the customer message.",
+      "criteria":["Very negative","Negative","Neutral","Positive","Very positive"]}}'::JSON
+  FROM support_tickets
+))
+ORDER BY row_id;
+```
+
+Pass a table subquery with exactly three columns, in order: a correlation ID, evidence, and the same question-object schema used by `jev_eval`. Results preserve supplied IDs, including duplicates and NULL IDs. A NULL evidence or questions value produces NULL result fields without an API call. Input column names are arbitrary; output columns are `row_id`, `answers` (JSON), `model`, and `cache_hit`. Use `ORDER BY` when ordering matters. Use the direct TABLE-subquery form shown above, not a lateral per-row invocation.
+
+This native table-in/out operator retains partial HTTP batches across input chunks, submits full batches while consuming input, and emits ready row prefixes between chunks. A single input producer feeds the shared HTTP pool; network concurrency still follows `jev_concurrency`. It retains at most 8192 pending rows, 16MiB of serialized input keys/IDs, and 32MiB of serialized buffered answers, with at most twice the configured concurrency in queued/running job slots. Each request and response also has its existing byte limit; returned model identifiers are limited to 1024 bytes. These are separate serialized-data/object-count bounds, not total RSS guarantees.
+
+Backpressure and finalization flush partial packs before waiting, so memory stays bounded and the final tail is returned. A slow earlier row can delay output. `LIMIT` can prefetch/pay for more rows than it returns; prepare a bounded input subquery when spend matters. Errors, cancellation, and early termination cancel/join outstanding jobs before destroying state. Already accepted API calls can still be billable.
+
 ## Performance verification
 
 ```sh
 uv run python -m benchmarks.run --rows 1000 --repeats 3 --delay-ms 10
+uv run python -m benchmarks.stream
 # CPU/transport baseline without simulated service delay:
 uv run python -m benchmarks.run --rows 1000 --repeats 3 --delay-ms 0
 ```
@@ -122,14 +144,17 @@ The benchmark starts only a local deterministic HTTP server and saves manifest, 
 
 Tests cover all primitives, mixed questions, constant/dictionary/flat vectors, nested nulls, multiple chunks, connection reuse, byte caps, oversized expanded payloads, response order, concurrency across connections, scheduler fairness, cancellation, timeout, queued failures, malformed outputs, query-cache budgets, statement/connection isolation, prepared execution, and cross-expression reuse.
 
-One explicitly opt-in test contacts TypeSafe with three questions in one request:
+Two explicitly opt-in tests contact TypeSafe: one scalar request with three questions and one streaming request with two rows (five questions total):
 
 ```sh
 JEV_RUN_LIVE=1 uv run pytest -q tests/test_live.py
 ```
 
-It saves the small response to `benchmarks/results/live-smoke.json`. It is skipped in ordinary test runs.
+The scalar test saves its small response to `benchmarks/results/live-smoke.json`. Both are skipped in ordinary test runs.
 
 ## Current limits
 
-This is a working local native extension, not a signed/published community extension. No automatic discovery of tables, cross-query persistent cache, DuckDB secret-provider integration, request-usage SQL metrics relation, automatic retries, or streaming table function has been added. The [original design](docs/design.md) is a proposal; this README describes what is implemented. Large relational scans are vectorized chunk-by-chunk; cross-chunk pipelining within a single serial scan is not yet implemented. Stub tests prove transport/mapping correctness, not model equivalence across all batch sizes; the small live smoke confirms protocol compatibility only.
+This is a working local native extension, not a signed/published community extension. No automatic discovery of tables, cross-query persistent cache, DuckDB secret-provider integration, request-usage SQL metrics relation, or automatic retries have been added. The [original design](docs/design.md) is a proposal; this README describes what is implemented. Scalar functions remain synchronous per chunk. Use `jev_stream` for bounded input prefetch, cross-chunk request packing, and overlapping HTTP work. Stub tests prove transport/mapping correctness, not model equivalence across all batch sizes; the small live smoke confirms protocol compatibility only.
+
+
+The current artifact targets native DuckDB, not DuckDB-Wasm. A Wasm port requires a matching Wasm extension build plus browser-compatible transport, scheduling, and credentials. See [DuckDB-Wasm extension documentation](https://duckdb.org/docs/current/clients/wasm/extensions).
