@@ -15,6 +15,12 @@ import pytest
 EXTENSION = Path(__file__).resolve().parents[1] / "build/extension/jev/jev.duckdb_extension"
 
 
+class TestHTTPServer(ThreadingHTTPServer):
+    # Python 3.11 defaults to five pending connections, below our ten workers.
+    # A larger backlog prevents test-server overload during concurrent connects.
+    request_queue_size = 128
+
+
 class Stub:
     def __init__(self) -> None:
         self.lock = threading.Lock()
@@ -104,7 +110,7 @@ class Stub:
                     with owner.lock:
                         owner.active -= 1
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = TestHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 

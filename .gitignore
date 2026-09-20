@@ -10,3 +10,5 @@ vendor/
 benchmarks/results/
 
 dist/
+
+test-results.xml

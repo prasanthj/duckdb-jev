@@ -1,6 +1,6 @@
 # Jev for DuckDB
 
-[![Native release builds](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml/badge.svg)](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml)
+[![Native build and tests](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml/badge.svg)](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml)
 [![DuckDB 1.5.5](https://img.shields.io/badge/DuckDB-1.5.5-fff000?logo=duckdb&logoColor=black)](https://duckdb.org/docs/stable/extensions/extension_distribution)
 [![Targets: macOS and Linux, x86-64 and ARM64](https://img.shields.io/badge/targets-macOS%20%7C%20Linux%20%C2%B7%20x86--64%20%7C%20ARM64-blue)](docs/distribution.md)
 
@@ -20,6 +20,8 @@ uv run pytest -q                  # local HTTP stub, no paid inference
 uv run pyright tests benchmarks
 uv run ruff check tests benchmarks
 ```
+
+The build disables jemalloc in the statically linked extension core to avoid an upstream non-unity compilation issue; it does not change the host DuckDB runtime’s allocator.
 
 The first build downloads pinned DuckDB v1.5.5 sources and builds the required core static library; subsequent builds are incremental. The vendored nlohmann JSON header is v3.12.0 and retains its upstream MIT license notice. No daemon is left running by the tests or benchmarks.
 
