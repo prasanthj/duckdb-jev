@@ -208,7 +208,9 @@ def test_slow_context_does_not_occupy_all_workers(stub: Stub) -> None:
         fast = pool.submit(query, 4, 12)
         fast.result(timeout=5)
         assert not slow.done()
-        slow.result(timeout=10)
+        # Fair scheduling is asserted above; draining the serial query is cleanup.
+        # Shared CI runners can take longer than ten seconds for 100 HTTP calls.
+        slow.result(timeout=60)
     assert 4 <= stub.peak <= 5
 
 

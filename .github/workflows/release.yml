@@ -57,6 +57,14 @@ jobs:
         shell: bash
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]
+      - name: Restore native build cache
+        id: native-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            build
+            vendor/duckdb
+          key: native-v1-${{ matrix.platform }}-${{ hashFiles('build.sh', 'CMakeLists.txt', 'extension_config.cmake', 'uv.lock') }}
       - name: Build Linux
         if: runner.os == 'Linux'
         run: ./build.sh
@@ -66,6 +74,14 @@ jobs:
         run: |
           sdk="$(xcrun --show-sdk-path)"
           ./build.sh -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCURL_INCLUDE_DIR="$sdk/usr/include" -DCURL_LIBRARY="$sdk/usr/lib/libcurl.tbd"
+      - name: Save successful native build before testing
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            build
+            vendor/duckdb
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
       - name: Test the real native binary (local HTTP only)
         run: |
           uv run pytest -q --junitxml=test-results.xml
