@@ -9,7 +9,7 @@ Implementation is now available; see README.md for the exact implemented surface
 5. Opt-in real integration: a tiny fixed evidence corpus, one bounded run covering all primitives and structured descriptions. Credentials never in fixtures. Budget enforced and retries off. Compare SDK and native request/response contracts before performance work.
 6. Performance and packaging: cold and warm HTTP, explicit no-cache/cache cases, single-row and packed requests, independent concurrency 1/4/10, token usage and wall time. Compare batch-size invariance and neighboring-row contamination. Report p50/p95 per request plus total query duration, not amortized per-row latency. Build macOS arm64 and Linux amd64 release-specific artifacts first; unsigned local loading only for development. Community distribution/signing is a later release step, not automatic publication.
 
-Useful AIDNN fixtures: support sentiment and renewal risk; closed-taxonomy intent classification; evidence verification; entity resolution over pre-retrieved KB candidate IDs. Keep these separate from function-correctness tests. A successful SQL function is not evidence that every semantic classification is correct.
+Useful evaluation fixtures: support sentiment and renewal risk; closed-taxonomy intent classification; evidence verification; entity resolution over pre-retrieved KB candidate IDs. Keep these separate from function-correctness tests. A successful SQL function is not evidence that every semantic classification is correct.
 
 ## Follow-up: bounded query reuse
 

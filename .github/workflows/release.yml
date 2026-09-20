@@ -1,0 +1,122 @@
+name: Build and release native extension
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'New release tag, created only after all platforms pass (for example v0.1.0)'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  build:
+    name: ${{ matrix.platform }} / DuckDB 1.5.5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux_amd64
+            runner: ubuntu-22.04
+            container: ubuntu:22.04
+          - platform: linux_arm64
+            runner: ubuntu-24.04-arm
+            container: ubuntu:22.04
+          - platform: osx_amd64
+            runner: macos-15-intel
+            container: ''
+          - platform: osx_arm64
+            runner: macos-14
+            container: ''
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 120
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+      JEV_BUILD_JOBS: '2'
+      UV_PYTHON: '3.11'
+      JEV_RUN_LIVE: '0'
+    steps:
+      - name: Install Linux toolchain
+        if: runner.os == 'Linux'
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends build-essential git curl ca-certificates libcurl4-openssl-dev
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+      - name: Validate release tag
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]
+      - name: Build Linux
+        if: runner.os == 'Linux'
+        run: ./build.sh
+      - name: Build macOS against system curl
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          sdk="$(xcrun --show-sdk-path)"
+          ./build.sh -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCURL_INCLUDE_DIR="$sdk/usr/include" -DCURL_LIBRARY="$sdk/usr/lib/libcurl.tbd"
+      - name: Test the real native binary (local HTTP only)
+        run: |
+          uv run pytest -q
+          uv run ruff check tests benchmarks scripts
+          uv run pyright tests benchmarks scripts
+      - name: Package verified artifact
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+        run: uv run python scripts/package_release.py --tag "$RELEASE_TAG" --platform "$TARGET_PLATFORM"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jev-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: jev-*
+          merge-multiple: true
+          path: dist
+      - name: Verify all four platforms and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          for platform in linux_amd64 linux_arm64 osx_amd64 osx_arm64; do
+            test -f "dist/jev-${RELEASE_TAG}-duckdb-v1.5.5-${platform}.tar.gz"
+          done
+          (cd dist && sha256sum -c ./*.sha256)
+          if git rev-parse --verify "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
+          fi
+          # Published releases are immutable here; never overwrite an existing one.
+          if gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' > release-state.txt 2>/dev/null; then
+            test "$(cat release-state.txt)" = true
+          else
+            gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --title "Jev $RELEASE_TAG / DuckDB 1.5.5" --notes-file docs/release-notes.md
+          fi
+          gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/*.sha256 --clobber
+          gh release edit "$RELEASE_TAG" --draft=false

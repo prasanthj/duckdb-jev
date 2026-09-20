@@ -40,7 +40,7 @@ Batch 25/concurrency 10; three cold/warm pairs per path. Connection cache 8MiB, 
 | Scalar | 435.97ms | 7.20ms | 6 /0 |
 | Stream | 245.38ms | 6.36ms | 6 /0 |
 
-Offline Parquet reuse: **129/129 rows**, **8.11ms**, zero HTTP requests, new DuckDB connection with no extension loaded. Export includes input/spec fingerprints, model/confidence inside the result, and creation time; reuse applies an age check. Distributed AIDNN caching remains deferred.
+Offline Parquet reuse: **129/129 rows**, **8.11ms**, zero HTTP requests, new DuckDB connection with no extension loaded. Export includes input/spec fingerprints, model/confidence inside the result, and creation time; reuse applies an age check. Distributed caching remains outside this implementation.
 
 ## Usage and artifacts
 
