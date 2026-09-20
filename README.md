@@ -6,7 +6,7 @@
 
 ![Terminal walkthrough: nested account evidence, renewal-risk classification with confidence, and cached query reuse](docs/images/terminal-hero.png)
 
-*Real Jev responses on synthetic data. Captured with VHS; timings are from one local run.*
+*Static terminal screenshot showing real Jev responses on synthetic data; timings are from one local run.*
 
 Native C++ extension for semantic predicates, classification and rubric scoring through TypeSafe/Jev. No Python UDF registration or Python inference server is required. Python/uv manage the build and test tools.
 
