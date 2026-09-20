@@ -57,6 +57,7 @@ class Stub:
                     owner.sockets.add(self.client_address)
                     owner.active += 1
                     owner.peak = max(owner.peak, owner.active)
+                processing = True
                 try:
                     time.sleep(owner.delay)
                     answers = {}
@@ -99,6 +100,13 @@ class Stub:
                         "usage": {"input_tokens": 10, "output_tokens": 5},
                     }
                     response = json.dumps(result).encode() if owner.mode != "malformed" else b"not-json"
+                    # Count overlapping request processing, not the server's
+                    # response-write epilogue. A client can begin its next
+                    # request as soon as it has read this response, before the
+                    # handler thread reaches its finally block on Linux.
+                    with owner.lock:
+                        owner.active -= 1
+                    processing = False
                     self.send_response(owner.status)
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(response)))
@@ -107,8 +115,9 @@ class Stub:
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 finally:
-                    with owner.lock:
-                        owner.active -= 1
+                    if processing:
+                        with owner.lock:
+                            owner.active -= 1
 
         self.server = TestHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)

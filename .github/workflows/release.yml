@@ -23,21 +23,25 @@ jobs:
           - platform: linux_amd64
             runner: ubuntu-22.04
             container: ubuntu:22.04
+            build_jobs: 4
           - platform: linux_arm64
             runner: ubuntu-24.04-arm
             container: ubuntu:22.04
+            build_jobs: 2
           - platform: osx_amd64
             runner: macos-15-intel
             container: ''
+            build_jobs: 4
           - platform: osx_arm64
             runner: macos-14
             container: ''
+            build_jobs: 3
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
     timeout-minutes: 120
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-      JEV_BUILD_JOBS: '2'
+      JEV_BUILD_JOBS: ${{ matrix.build_jobs }}
       UV_PYTHON: '3.11'
       JEV_RUN_LIVE: '0'
     steps:
@@ -87,7 +91,7 @@ jobs:
           path: |
             build
             vendor/duckdb
-          key: native-v2-${{ matrix.platform }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('build.sh', 'CMakeLists.txt', 'extension_config.cmake', 'uv.lock', '.github/workflows/release.yml') }}
+          key: native-v3-unity-cxx17-nojemalloc-${{ matrix.platform }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('build.sh', 'CMakeLists.txt', 'extension_config.cmake', 'uv.lock') }}
       - name: Build Linux
         if: runner.os == 'Linux'
         run: ./build.sh

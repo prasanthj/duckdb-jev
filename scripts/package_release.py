@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 import platform
 import re
 import subprocess
@@ -27,11 +28,16 @@ def main() -> None:
     parser.add_argument("--platform", required=True, choices=["linux_amd64", "linux_arm64", "osx_amd64", "osx_arm64"])
     args = parser.parse_args()
     binary = ROOT / "build/extension/jev/jev.duckdb_extension"
+    # The smoke query is deliberately null and must not perform inference.
+    # Supply a non-secret placeholder because extension configuration still
+    # validates credentials, and point any regression at closed loopback.
+    os.environ["TYPESAFE_API_KEY"] = "package-smoke-never-sent"
     with duckdb.connect(config={"allow_unsigned_extensions": True}) as con:
         actual = con.execute("PRAGMA platform").fetchone()
         if actual != (args.platform,) or duckdb.__version__ != "1.5.5":
             raise RuntimeError(f"Runtime mismatch: DuckDB {duckdb.__version__}, platform {actual}")
         con.execute(f"LOAD '{binary}'")
+        con.execute("SET jev_endpoint = 'http://127.0.0.1:1/v1/systemone'")
         if con.execute("SELECT jev_noul(NULL,'no API call')").fetchone() != (None,):
             raise RuntimeError("Native smoke check failed")
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()

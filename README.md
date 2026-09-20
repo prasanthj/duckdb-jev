@@ -25,7 +25,7 @@ uv run pyright tests benchmarks
 uv run ruff check tests benchmarks
 ```
 
-The build disables jemalloc in the statically linked extension core to avoid an upstream non-unity compilation issue; it does not change the host DuckDB runtime’s allocator.
+The build uses DuckDB's unity compilation and disables jemalloc in the statically linked extension core. This does not change the host DuckDB runtime's allocator.
 
 The first build downloads pinned DuckDB v1.5.5 sources and builds the required core static library; subsequent builds are incremental. The vendored nlohmann JSON header is v3.12.0 and retains its upstream MIT license notice. No daemon is left running by the tests or benchmarks.
 

@@ -16,13 +16,14 @@ def test_release_archive_loads_and_contains_verifiable_metadata() -> None:
         result = connection.execute("PRAGMA platform").fetchone()
     assert result is not None
     platform = str(result[0])
-    subprocess.run(
+    completed = subprocess.run(
         [sys.executable, "scripts/package_release.py", "--tag", "v0.0.0-test", "--platform", platform],
         cwd=root,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    assert completed.returncode == 0, f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
     archive = root / "dist" / f"jev-v0.0.0-test-duckdb-v1.5.5-{platform}.tar.gz"
     checksum = archive.with_suffix(".gz.sha256")
     try:
