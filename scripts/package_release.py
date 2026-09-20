@@ -61,6 +61,8 @@ def main() -> None:
             tar.add(metadata, arcname="manifest.json")
             tar.add(ROOT / "README.md", arcname="README.md")
             tar.add(ROOT / "docs/distribution.md", arcname="DISTRIBUTION.md")
+            tar.add(ROOT / "LICENSE", arcname="LICENSE")
+            tar.add(ROOT / "NOTICE", arcname="NOTICE")
             tar.add(ROOT / "vendor/duckdb/LICENSE", arcname="LICENSE.duckdb")
             tar.add(ROOT / "src/include/LICENSE.nlohmann-json", arcname="LICENSE.nlohmann-json")
     archive.with_suffix(archive.suffix + ".sha256").write_text(

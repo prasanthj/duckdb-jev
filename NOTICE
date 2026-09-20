@@ -1,0 +1,6 @@
+duckdb-jev
+Copyright 2026 Prasanth Jayachandran
+
+This product includes DuckDB, licensed under the MIT License, and nlohmann/json,
+licensed under the MIT License. Their license texts are included with binary
+release archives.

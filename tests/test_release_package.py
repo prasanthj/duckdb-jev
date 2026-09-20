@@ -31,7 +31,7 @@ def test_release_archive_loads_and_contains_verifiable_metadata() -> None:
         with tarfile.open(archive) as package:
             assert set(package.getnames()) == {
                 "jev.duckdb_extension", "manifest.json", "README.md", "DISTRIBUTION.md",
-                "LICENSE.duckdb", "LICENSE.nlohmann-json",
+                "LICENSE", "NOTICE", "LICENSE.duckdb", "LICENSE.nlohmann-json",
             }
             metadata = package.extractfile("manifest.json")
             binary = package.extractfile("jev.duckdb_extension")

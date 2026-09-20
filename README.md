@@ -3,10 +3,11 @@
 [![Native build and tests](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml/badge.svg)](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml)
 [![DuckDB 1.5.5](https://img.shields.io/badge/DuckDB-1.5.5-fff000?logo=duckdb&logoColor=black)](https://duckdb.org/docs/stable/extensions/extension_distribution)
 [![Targets: macOS and Linux, x86-64 and ARM64](https://img.shields.io/badge/targets-macOS%20%7C%20Linux%20%C2%B7%20x86--64%20%7C%20ARM64-blue)](docs/distribution.md)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-![Terminal walkthrough: nested account evidence, renewal-risk classification with confidence, and cached query reuse](docs/images/terminal-hero.png)
+![Animated terminal walkthrough: nested account evidence, renewal-risk classification with confidence, and cached query reuse](docs/images/terminal-demo.gif)
 
-*Static terminal screenshot showing real Jev responses on synthetic data; timings are from one local run.*
+*Real Jev responses on synthetic data; timings are from one local run. Reproduce the animation with `vhs examples/terminal_demo.tape`.*
 
 Native C++ extension for semantic predicates, classification and rubric scoring through TypeSafe/Jev. No Python UDF registration or Python inference server is required. Python/uv manage the build and test tools.
 
@@ -28,6 +29,10 @@ uv run ruff check tests benchmarks
 The build uses DuckDB's unity compilation and disables jemalloc in the statically linked extension core. This does not change the host DuckDB runtime's allocator.
 
 The first build downloads pinned DuckDB v1.5.5 sources and builds the required core static library; subsequent builds are incremental. The vendored nlohmann JSON header is v3.12.0 and retains its upstream MIT license notice. No daemon is left running by the tests or benchmarks.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE). Binary release archives also include the applicable DuckDB and nlohmann/json license notices.
 
 ## Load and use
 

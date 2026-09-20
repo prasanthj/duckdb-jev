@@ -14,7 +14,7 @@ sha256sum -c jev-v0.1.0-duckdb-v1.5.5-linux_amd64.tar.gz.sha256
 tar -xzf jev-v0.1.0-duckdb-v1.5.5-linux_amd64.tar.gz
 ```
 
-Each archive contains the extension, a compatibility manifest, documentation, and dependency license notices. Pin the release and checksum in deployment builds; install runtime libraries and copy the extension into the image. Supply `TYPESAFE_API_KEY` only at runtime.
+Each archive contains the extension, a compatibility manifest, documentation, the Apache 2.0 project license and NOTICE, and dependency license notices. Pin the release and checksum in deployment builds; install runtime libraries and copy the extension into the image. Supply `TYPESAFE_API_KEY` only at runtime.
 
 These binaries are unsigned. Enable unsigned extensions only in a trusted DuckDB runtime, then load the verified local file:
 
