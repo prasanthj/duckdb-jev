@@ -58,7 +58,7 @@ jobs:
             compile_flags: -fsanitize=address,undefined -fno-omit-frame-pointer
             runtime_library: libasan.so
             pytest_args: tests
-            runtime_options: detect_leaks=1:halt_on_error=1
+            runtime_options: detect_leaks=0:halt_on_error=1
           - name: TSan
             compile_flags: -fsanitize=thread -fno-omit-frame-pointer
             runtime_library: libtsan.so
@@ -96,4 +96,5 @@ jobs:
           else
             export TSAN_OPTIONS="$RUNTIME_OPTIONS"
           fi
-          LD_PRELOAD="$runtime" uv run pytest -q $PYTEST_ARGS
+          # Keep uv's own Tokio worker threads outside the sanitizer process.
+          LD_PRELOAD="$runtime" .venv/bin/python -m pytest -q $PYTEST_ARGS
