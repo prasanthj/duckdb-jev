@@ -231,11 +231,11 @@ def test_provider_failure_never_becomes_a_cached_decision(db: duckdb.DuckDBPyCon
     stub.status = 429
     with pytest.raises(duckdb.InvalidInputException):
         query(db)
-    assert len(stub.calls) == 1  # No hidden retry.
+    assert len(stub.calls) == 3  # Initial attempt plus the default retry budget.
     stub.status = 200
     assert not query(db)["cache_hit"]
     assert query(db)["cache_hit"]
-    assert len(stub.calls) == 2
+    assert len(stub.calls) == 4
 
 
 def test_choice_descriptions_are_part_of_cache_key(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:

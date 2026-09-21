@@ -138,6 +138,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -152,6 +154,10 @@ jobs:
           pattern: jev-*
           merge-multiple: true
           path: dist
+      - name: Attest release archives
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: dist/*.tar.gz
       - name: Verify all four platforms and publish
         shell: bash
         run: |

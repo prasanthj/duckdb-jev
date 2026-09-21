@@ -9,6 +9,7 @@ import re
 import subprocess
 import tarfile
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -41,10 +42,15 @@ def main() -> None:
         if con.execute("SELECT jev_noul(NULL,'no API call')").fetchone() != (None,):
             raise RuntimeError("Native smoke check failed")
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    commit_time = subprocess.check_output(
+        ["git", "show", "-s", "--format=%cI", "HEAD"], cwd=ROOT, text=True
+    ).strip()
+    sbom_created = datetime.fromisoformat(commit_time).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     manifest = {
         "extension": "jev", "release": args.tag, "duckdb_version": duckdb.__version__,
         "platform": args.platform, "architecture": platform.machine(),
-        "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "git_commit": commit,
         "sha256": digest, "signed": False,
         "minimum_os": "glibc 2.35 (Ubuntu 22.04 baseline)" if args.platform.startswith("linux") else "macOS 12",
         "runtime_dependencies": ["libcurl.so.4", "libstdc++.so.6", "CA certificates"] if args.platform.startswith("linux")
@@ -56,9 +62,85 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         metadata = Path(temporary) / "manifest.json"
         metadata.write_text(json.dumps(manifest, indent=2) + "\n")
+        sbom = Path(temporary) / "SBOM.spdx.json"
+        sbom.write_text(
+            json.dumps(
+                {
+                    "spdxVersion": "SPDX-2.3",
+                    "dataLicense": "CC0-1.0",
+                    "SPDXID": "SPDXRef-DOCUMENT",
+                    "name": f"duckdb-jev-{args.tag}-{args.platform}",
+                    "documentNamespace": (
+                        f"https://github.com/prasanthj/duckdb-jev/releases/{args.tag}/"
+                        f"{args.platform}/{commit}"
+                    ),
+                    "creationInfo": {"created": sbom_created, "creators": ["Tool: scripts/package_release.py"]},
+                    "packages": [
+                        {
+                            "name": "duckdb-jev",
+                            "SPDXID": "SPDXRef-Package-duckdb-jev",
+                            "versionInfo": args.tag.removeprefix("v"),
+                            "downloadLocation": "NOASSERTION",
+                            "filesAnalyzed": True,
+                            "licenseConcluded": "Apache-2.0",
+                            "licenseDeclared": "Apache-2.0",
+                            "checksums": [{"algorithm": "SHA256", "checksumValue": digest}],
+                        },
+                        {
+                            "name": "DuckDB",
+                            "SPDXID": "SPDXRef-Package-DuckDB",
+                            "versionInfo": duckdb.__version__,
+                            "downloadLocation": "https://github.com/duckdb/duckdb",
+                            "filesAnalyzed": False,
+                            "licenseConcluded": "MIT",
+                            "licenseDeclared": "MIT",
+                        },
+                        {
+                            "name": "nlohmann-json",
+                            "SPDXID": "SPDXRef-Package-nlohmann-json",
+                            "versionInfo": "3.12.0",
+                            "downloadLocation": "https://github.com/nlohmann/json",
+                            "filesAnalyzed": False,
+                            "licenseConcluded": "MIT",
+                            "licenseDeclared": "MIT",
+                        },
+                        {
+                            "name": "libcurl",
+                            "SPDXID": "SPDXRef-Package-libcurl-system",
+                            "downloadLocation": "NOASSERTION",
+                            "filesAnalyzed": False,
+                            "licenseConcluded": "NOASSERTION",
+                            "licenseDeclared": "NOASSERTION",
+                        },
+                    ],
+                    "relationships": [
+                        {
+                            "spdxElementId": "SPDXRef-DOCUMENT",
+                            "relationshipType": "DESCRIBES",
+                            "relatedSpdxElement": "SPDXRef-Package-duckdb-jev",
+                        },
+                        *[
+                            {
+                                "spdxElementId": "SPDXRef-Package-duckdb-jev",
+                                "relationshipType": "DEPENDS_ON",
+                                "relatedSpdxElement": dependency,
+                            }
+                            for dependency in (
+                                "SPDXRef-Package-DuckDB",
+                                "SPDXRef-Package-nlohmann-json",
+                                "SPDXRef-Package-libcurl-system",
+                            )
+                        ],
+                    ],
+                },
+                indent=2,
+            )
+            + "\n"
+        )
         with tarfile.open(archive, "w:gz") as tar:
             tar.add(binary, arcname="jev.duckdb_extension")
             tar.add(metadata, arcname="manifest.json")
+            tar.add(sbom, arcname="SBOM.spdx.json")
             tar.add(ROOT / "README.md", arcname="README.md")
             tar.add(ROOT / "docs/distribution.md", arcname="DISTRIBUTION.md")
             tar.add(ROOT / "LICENSE", arcname="LICENSE")

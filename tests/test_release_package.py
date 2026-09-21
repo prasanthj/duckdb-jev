@@ -31,17 +31,23 @@ def test_release_archive_loads_and_contains_verifiable_metadata() -> None:
         with tarfile.open(archive) as package:
             assert set(package.getnames()) == {
                 "jev.duckdb_extension", "manifest.json", "README.md", "DISTRIBUTION.md",
-                "LICENSE", "NOTICE", "LICENSE.duckdb", "LICENSE.nlohmann-json",
+                "SBOM.spdx.json", "LICENSE", "NOTICE", "LICENSE.duckdb", "LICENSE.nlohmann-json",
             }
             metadata = package.extractfile("manifest.json")
+            sbom_file = package.extractfile("SBOM.spdx.json")
             binary = package.extractfile("jev.duckdb_extension")
-            assert metadata is not None and binary is not None
+            assert metadata is not None and sbom_file is not None and binary is not None
             manifest = json.load(metadata)
+            sbom = json.load(sbom_file)
             assert manifest["platform"] == platform
             assert manifest["duckdb_version"] == "1.5.5"
             assert manifest["release"] == "v0.0.0-test"
             assert manifest["signed"] is False
             assert manifest["sha256"] == hashlib.sha256(binary.read()).hexdigest()
+            assert sbom["spdxVersion"] == "SPDX-2.3"
+            assert {package["name"] for package in sbom["packages"]} == {
+                "duckdb-jev", "DuckDB", "nlohmann-json", "libcurl"
+            }
     finally:
         archive.unlink(missing_ok=True)
         checksum.unlink(missing_ok=True)

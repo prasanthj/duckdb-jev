@@ -1,14 +1,18 @@
 # Real Jev evaluation and cache results
 
-Native DuckDB v1.5.5 on macOS arm64; returned model `jev-1.13.0`. Run on 2026-09-18 UTC. All inference requests forwarded unchanged over HTTPS to the real TypeSafe endpoint through an instrumented loopback relay. No retries. Test data: nested synthetic support tickets from 12 templates. These are functional/throughput measurements, not production accuracy estimates.
+Native DuckDB v1.5.5 on macOS arm64; returned model `jev-1.13.0`. Main benchmark run on 2026-09-18 UTC, with batch-equivalence verification repeated on 2026-09-20. All inference requests used the real TypeSafe endpoint, and no retries were observed. Test data: nested synthetic support tickets from 12 templates. These are functional/throughput measurements, not production accuracy estimates.
 
 ## Validation
 
-- Full regression suite: **91 passed**, including two opt-in live API smoke tests. Fault injection, concurrency accounting and deterministic edge cases use the local stub.
+- Full deterministic regression suite: **109 passed, 3 skipped**. Three opt-in live API tests also passed. Fault injection, concurrency accounting and deterministic edge cases use the local stub.
 - Main live suite: **39 queries completed**, **1,325 requests**, **7,748 judgments**; every HTTP response 200.
 - All main-suite outputs matched the fixture's routing/refund expectations or score tolerance (±0.75 rubric index). Repeated templates limit this result's generality.
 - Cache suite: **36 additional requests**, **774 judgments**; validated 129 rows across six first-run/cached-repeat pairs. Every warm query had 129 cache hits and zero requests.
 - Independent review: 52 cache/query/stream tests passed; no blocking findings remain.
+
+## Batch-equivalence check
+
+The live equivalence test evaluated 12 nested inputs with Choice, Score and Noul questions at batch sizes 1, 10, 25 and 100. All Choice labels and Noul threshold decisions matched the batch-1 baseline. The largest numeric difference in a confidence, probability or score field was 0.13. A repeated batch-1 control differed by as much as 0.10, confirming that small numeric movement is normal live-model variation rather than evidence of cross-row contamination. The test fails on any Choice or Noul-decision mismatch, a model change, or a numeric delta above 0.15.
 
 ## Median wall time for 100 unique rows
 

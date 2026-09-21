@@ -91,6 +91,7 @@ struct StreamState : LocalTableFunctionState {
     pack.payload += "}}";
     auto submitted = std::make_shared<StreamPack>(std::move(pack));
     pack = {prefix, {}};
+    query->Reserve(submitted->refs.size(), 1, *options);
     // Allocate the future slot before submitting a task which captures this.
     jobs.emplace_back();
     try {
@@ -100,7 +101,8 @@ struct StreamState : LocalTableFunctionState {
               if (stopped.load())
                 return;
               auto response =
-                  Request(curl, submitted->payload, *options, ctx, stopped);
+                  Request(curl, submitted->payload, submitted->refs.size(),
+                          *options, ctx, stopped);
               if (!response.is_object() || !ValidModel(response) ||
                   !response.contains("answers") ||
                   !response["answers"].is_object() ||
@@ -178,8 +180,10 @@ struct StreamState : LocalTableFunctionState {
     }
     rows.push_back(row);
     retained += row->bytes;
-    if (!row->owner)
+    if (!row->owner) {
+      metrics.cache_hits++;
       return true;
+    }
     size_t expanded = 0;
     for (auto &q : row->questions.items()) {
       Check();

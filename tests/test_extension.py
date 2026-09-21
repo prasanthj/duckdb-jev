@@ -5,7 +5,7 @@ from typing import Any
 
 import duckdb
 import pytest
-from conftest import Stub, connect
+from conftest import EXTENSION, Stub, connect
 
 
 def test_primitives(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
@@ -99,9 +99,23 @@ def test_protocol_error_is_not_false(db: duckdb.DuckDBPyConnection, stub: Stub, 
     assert len(stub.calls) == 1
 
 
-def test_http_failure_no_retry(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
-    stub.status = 429
-    with pytest.raises(duckdb.Error, match="429"):
+def test_retryable_failures_recover_and_are_counted(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
+    before = db.execute("SELECT requests, retries, errors FROM jev_stats()").fetchone()
+    assert before is not None
+    db.execute("SET jev_retry_base_ms=1")
+    db.execute("SET jev_retry_max_delay_ms=1")
+    stub.status_sequence = [429, 503, 200]
+    stub.retry_after = "0"
+    assert db.execute("SELECT (jev_noul('x','p')).noul").fetchone() == (0.9,)
+    after = db.execute("SELECT requests, retries, errors FROM jev_stats()").fetchone()
+    assert after is not None
+    assert tuple(after[i] - before[i] for i in range(3)) == (1, 2, 0)
+    assert [call["status"] for call in stub.calls] == [429, 503, 200]
+
+
+def test_permanent_http_failure_is_not_retried(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
+    stub.status = 400
+    with pytest.raises(duckdb.Error, match="400.*1 attempt"):
         db.execute("SELECT jev_noul('x','p')").fetchall()
     assert len(stub.calls) == 1
 
@@ -149,6 +163,7 @@ def test_timeout_stops_queued_work(db: duckdb.DuckDBPyConnection, stub: Stub) ->
     db.execute("SET jev_batch_size=1")
     db.execute("SET jev_concurrency=1")
     db.execute("SET jev_timeout_ms=30")
+    db.execute("SET jev_max_retries=0")
     stub.delay = 0.15
     with pytest.raises(duckdb.Error, match="transport failed"):
         db.execute("SELECT jev_noul({'i':i},'p') FROM range(200) t(i)").fetchall()
@@ -230,6 +245,75 @@ def test_invalid_environment_key_fails_before_request(
         monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     else:
         monkeypatch.setenv("TYPESAFE_API_KEY", key)
-    with pytest.raises(duckdb.InvalidInputException, match="TYPESAFE_API_KEY is not configured or invalid"):
+    with pytest.raises(duckdb.InvalidInputException, match="no valid Jev credential"):
         db.execute("SELECT jev_noul('evidence','question')").fetchall()
+    assert not stub.calls
+
+
+def test_duckdb_secret_overrides_environment(
+    stub: Stub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    con = duckdb.connect(config={"allow_unsigned_extensions": True})
+    try:
+        con.execute(f"LOAD '{EXTENSION}'")
+        con.execute(
+            "CREATE SECRET jev_test (TYPE jev, API_KEY 'secret-test-key', "
+            f"ENDPOINT '{stub.endpoint}', MODEL 'jev-secret-model')"
+        )
+        assert con.execute("SELECT (jev_noul('evidence','question')).noul").fetchone() == (0.9,)
+        assert stub.calls[0]["authorization"] == "Bearer secret-test-key"
+        assert stub.calls[0]["body"]["model"] == "jev-secret-model"
+        secret = con.execute(
+            "SELECT secret_string FROM duckdb_secrets() WHERE name='jev_test'"
+        ).fetchone()
+        assert secret is not None and "secret-test-key" not in secret[0]
+    finally:
+        con.close()
+
+
+def test_stats_reports_requests_questions_tokens_and_bytes(
+    db: duckdb.DuckDBPyConnection, stub: Stub
+) -> None:
+    columns = "requests,questions,cache_hits,retries,errors,input_tokens,output_tokens,request_bytes,response_bytes"
+    before = db.execute(f"SELECT {columns} FROM jev_stats()").fetchone()
+    assert before is not None
+    rows = db.execute("SELECT jev_noul({'i':i},'usage') FROM range(3) t(i)").fetchall()
+    assert len(rows) == 3
+    after = db.execute(f"SELECT {columns} FROM jev_stats()").fetchone()
+    assert after is not None
+    delta = tuple(after[i] - before[i] for i in range(len(before)))
+    assert delta[:7] == (1, 3, 0, 0, 0, 10, 5)
+    assert delta[7] > 0 and delta[8] > 0
+
+
+@pytest.mark.parametrize(
+    ("setting", "value", "sql", "message"),
+    [
+        (
+            "jev_max_questions_per_query",
+            10,
+            "SELECT jev_noul({'i':i},'budget') FROM range(11) t(i)",
+            "max_questions",
+        ),
+        (
+            "jev_max_requests_per_query",
+            1,
+            "SELECT jev_noul({'i':i},'budget') FROM range(26) t(i)",
+            "max_requests",
+        ),
+    ],
+)
+def test_query_budgets_fail_before_scalar_dispatch(
+    db: duckdb.DuckDBPyConnection,
+    stub: Stub,
+    setting: str,
+    value: int,
+    sql: str,
+    message: str,
+) -> None:
+    db.execute("SET jev_batch_size=25")
+    db.execute(f"SET {setting}={value}")
+    with pytest.raises(duckdb.Error, match=message):
+        db.execute(sql).fetchall()
     assert not stub.calls

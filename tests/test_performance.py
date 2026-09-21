@@ -1,5 +1,7 @@
 """Deterministic performance contracts, not vendor latency claims."""
 
+import json
+
 import duckdb
 import pytest
 from conftest import Stub
@@ -30,3 +32,35 @@ def test_repeated_rows_cache_scope(db: duckdb.DuckDBPyConnection, stub: Stub) ->
     assert sum(row[0]["cache_hit"] for row in rows) == 4096
     db.execute("SELECT jev_noul('same','p')").fetchall()
     assert len(stub.calls) == 2  # No reuse across statements.
+
+
+def test_batch_sizes_preserve_all_primitive_answers(
+    db: duckdb.DuckDBPyConnection, stub: Stub
+) -> None:
+    questions = json.dumps(
+        {
+            "route": {
+                "type": "choice",
+                "instructions": "Choose a route",
+                "criteria": {"a": "first", "b": "second", "c": "third"},
+            },
+            "severity": {
+                "type": "score",
+                "instructions": "Score severity",
+                "criteria": ["low", "high"],
+            },
+            "urgent": {"type": "noul", "instructions": "Is this urgent?"},
+        }
+    )
+
+    def classify(batch: int) -> list[tuple[int, str]]:
+        db.execute(f"SET jev_batch_size={batch}")
+        return db.execute(
+            "SELECT i, (jev_eval({'i':i,'nested':{'text':'ticket-'||i}}, ?::JSON)).answers "
+            "FROM range(37) t(i) ORDER BY i",
+            [questions],
+        ).fetchall()
+
+    baseline = classify(1)
+    for batch in (10, 25, 100):
+        assert classify(batch) == baseline

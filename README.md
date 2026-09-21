@@ -1,15 +1,27 @@
 # Jev for DuckDB
 
 [![Native build and tests](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml/badge.svg)](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml)
+[![Native CI](https://github.com/prasanthj/duckdb-jev/actions/workflows/ci.yml/badge.svg)](https://github.com/prasanthj/duckdb-jev/actions/workflows/ci.yml)
 [![DuckDB 1.5.5](https://img.shields.io/badge/DuckDB-1.5.5-fff000?logo=duckdb&logoColor=black)](https://duckdb.org/docs/stable/extensions/extension_distribution)
 [![Targets: macOS and Linux, x86-64 and ARM64](https://img.shields.io/badge/targets-macOS%20%7C%20Linux%20%C2%B7%20x86--64%20%7C%20ARM64-blue)](docs/distribution.md)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
+High-throughput, robust native C++ DuckDB extension for semantic predicates, classification and rubric scoring through TypeSafe/Jev. It batches and streams inference directly from SQL without Python UDF registration or a separate inference server.
+
+## Features
+
+- **SQL-native judgments:** Noul predicates, finite Choice classification, ordered Score rubrics and mixed multi-question evaluation.
+- **Batched and streaming execution:** packs up to 1,000 independent judgments per request, runs bounded concurrent HTTP work and streams across DuckDB chunks.
+- **Structured evidence:** evaluates text, JSON, STRUCT, LIST and ARRAY values without exporting columns through Python or pandas.
+- **Safe credentials:** reads a scoped DuckDB `jev` secret first and falls back to `TYPESAFE_API_KEY`; API keys never appear in query results or cache keys.
+- **Production controls:** strict response validation, cancellation, bounded memory, per-query request/question budgets and jittered retries for transient failures.
+- **Measured reuse:** query deduplication, concurrent-miss coalescing, opt-in connection LRU with TTL and an offline Parquet reuse pattern.
+- **Observable:** `jev_stats()` reports requests, questions, retries, failures, cache hits, tokens, bytes and transport latency.
+- **Verifiable releases:** native macOS/Linux builds for x86-64 and ARM64, SHA-256 checksums, SPDX SBOMs and GitHub build provenance.
+
 ![Animated terminal walkthrough: nested account evidence, renewal-risk classification with confidence, and cached query reuse](docs/images/terminal-demo.gif)
 
 *Real Jev responses on synthetic data; timings are from one local run. Reproduce the animation with `vhs examples/terminal_demo.tape`.*
-
-Native C++ extension for semantic predicates, classification and rubric scoring through TypeSafe/Jev. No Python UDF registration or Python inference server is required. Python/uv manage the build and test tools.
 
 Implemented and tested on macOS arm64 with DuckDB **1.5.5**. The built artifact is `build/extension/jev/jev.duckdb_extension`. Native C++ extensions must match DuckDB's version and platform; other platforms need their own build and verification.
 
@@ -22,8 +34,8 @@ Requirements: `uv`, Git, a C++17 compiler, and libcurl development headers/libra
 ```sh
 ./build.sh
 uv run pytest -q                  # local HTTP stub, no paid inference
-uv run pyright tests benchmarks
-uv run ruff check tests benchmarks
+uv run pyright tests benchmarks scripts examples
+uv run ruff check tests benchmarks scripts examples
 ```
 
 The build uses DuckDB's unity compilation and disables jemalloc in the statically linked extension core. This does not change the host DuckDB runtime's allocator.
@@ -68,7 +80,13 @@ con = duckdb.connect(config={"allow_unsigned_extensions": True})
 con.execute("LOAD '/absolute/path/to/jev.duckdb_extension'")
 ```
 
-Set `TYPESAFE_API_KEY` in the environment. Credentials are never needed in SQL. The native C++ extension uses the HTTP API directly and does not load local credential files or depend on the Python SDK. Input data goes to TypeSafe for remote inference. DuckDB `enable_external_access=false` prevents requests.
+Create a temporary DuckDB secret for shared or long-lived processes:
+
+```sql
+CREATE SECRET (TYPE jev, API_KEY '...', MODEL 'jev-1.13.0');
+```
+
+`ENDPOINT` is also supported. A matching DuckDB secret takes precedence over `TYPESAFE_API_KEY`; the environment variable remains the convenient local fallback. The native extension uses the HTTP API directly and does not load credential files or depend on the Python SDK. Input data goes to TypeSafe for remote inference. DuckDB `enable_external_access=false` prevents requests.
 
 ## Functions
 
@@ -79,6 +97,7 @@ Set `TYPESAFE_API_KEY` in the environment. Credentials are never needed in SQL. 
 | `jev_choice(evidence, instructions, criteria)` | STRUCT with `choice`, `confidence`, `probabilities`, `model`, `cache_hit` |
 | `jev_score(evidence, instructions, levels)` | STRUCT with `score`, `confidence`, `probabilities`, `legend`, `model`, `cache_hit` |
 | `jev_eval(evidence, questions)` | STRUCT with named `answers` as JSON, `model`, `cache_hit` |
+| `jev_stats()` | One row of process-level request, question, retry, error, cache, token, byte and latency counters |
 
 Evidence supports text, JSON objects/arrays, and nested DuckDB STRUCT/LIST/ARRAY. Nested nulls are preserved. Decimal, huge integer, date and timestamp fields serialize as lossless strings; ordinary integer/boolean/float fields retain JSON types. Unsupported types require an explicit `to_json()` conversion. Non-finite numbers and top-level scalar numeric/boolean/JSON-null states are rejected. Any SQL NULL argument produces NULL without parsing other arguments or making a request.
 
@@ -104,7 +123,7 @@ See [renewal.sql](examples/renewal.sql) for a realistic multi-question account w
 
 The scalar functions process DuckDB chunks. They respect validity/selection vectors, deduplicate identical evidence and questions within a chunk, pack questions into byte/count-bounded HTTP requests, and reassemble answers by IDs regardless of completion order. Constant evidence/instructions/criteria are converted once per chunk. Completed results are also reused across chunks and expressions within the same query. Payload packing uses incremental byte accounting rather than repeatedly copying/serializing a growing request.
 
-A persistent 10-worker pool reuses CURL connection caches across chunks. The scheduler admits tasks only when their connection's concurrency limit permits, so a concurrency-1 query does not occupy all workers with waiting tasks. At most 10 requests run across the process. No automatic retries.
+A persistent 10-worker pool reuses CURL connection caches across chunks. The scheduler admits tasks only when their connection's concurrency limit permits, so a concurrency-1 query does not occupy all workers with waiting tasks. At most 10 requests run across the process.
 
 ```sql
 SET jev_model = 'jev-latest';
@@ -112,6 +131,11 @@ SET jev_batch_size = 25;                 -- questions per request, NOT rows
 SET jev_concurrency = 10;               -- per connection, process ceiling 10
 SET jev_max_request_bytes = 65536;      -- exact serialized HTTP body cap
 SET jev_timeout_ms = 30000;
+SET jev_max_retries = 2;                 -- transient transport, 429 and 5xx only
+SET jev_retry_base_ms = 100;             -- exponential backoff with jitter
+SET jev_retry_max_delay_ms = 5000;       -- also caps Retry-After
+SET jev_max_questions_per_query = 100000;
+SET jev_max_requests_per_query = 2000;
 
 -- Independent concurrent requests, without request batching:
 SET jev_batch_size = 1;
@@ -125,7 +149,15 @@ Allowed ranges: batch 1–1000, concurrency 1–10, request bytes 256–1048576,
 
 Query results and the configuration/key snapshot are cleared at query end, including errors/cancellation. Prepared-statement executions and statements inside a transaction get separate caches. No disk cache exists. By default repeated queries call the service again; cross-query reuse requires the explicit connection-cache opt-in below. `LIMIT` does not guarantee an exact number of calls because SQL operates in chunks. Materialize deterministic candidate rows before inference when bounding spend matters. Rollback cannot undo API charges.
 
-Provider failures raise a query error, never FALSE or a low-confidence prediction. Timeout, malformed output, missing/extra answers, invalid choices/probabilities and HTTP errors fail closed with sanitized messages. Cancellation stops further scheduled work and interrupts transfers; requests already accepted remotely may still be billable. `EXPLAIN` makes no calls; `EXPLAIN ANALYZE` executes.
+Transient transport failures, HTTP 429 and HTTP 5xx responses retry with exponential backoff, bounded jitter and `Retry-After` support. Other 4xx responses and invalid provider output fail immediately. Retries can duplicate a remotely accepted request if its response was lost, so `jev_stats()` reports them. Provider failures raise a query error, never FALSE or a low-confidence prediction. Cancellation stops further scheduled work and interrupts transfers; requests already accepted remotely may still be billable. `EXPLAIN` makes no calls; `EXPLAIN ANALYZE` executes.
+
+The question and logical-request budgets are checked before scalar dispatch and before each streaming pack. They limit new provider work; cache hits do not consume them. Streaming can have earlier packs in flight before a later pack reaches a query limit, so materialize a bounded input relation when an exact preflight boundary matters.
+
+```sql
+SELECT * FROM jev_stats();
+```
+
+Usage is process-wide and monotonic for the loaded extension. `requests` counts logical request packs, while `retries` counts additional HTTP attempts. Byte counters include retry traffic. Token counters use provider-reported usage when present. Latency is accumulated per logical request across all of its attempts.
 
 ## Repeated queries and persisted reuse
 
@@ -173,13 +205,13 @@ uv run python -m benchmarks.stream
 uv run python -m benchmarks.run --rows 1000 --repeats 3 --delay-ms 0
 ```
 
-The benchmark starts only a local deterministic HTTP server and saves manifest, per-trial data, summaries and a report under `benchmarks/results/<timestamp>/`. It covers batch sizes 1/25/100 and concurrency 1/4/10 by default. These are extension/HTTP measurements, **not Jev latency or semantic accuracy claims**. See [real Jev results](docs/live-results.md), [local benchmark results](docs/benchmark-results.md) and the [independent performance review](docs/performance-review.md).
+The benchmark starts only a local deterministic HTTP server and saves manifest, per-trial data, summaries and a report under `benchmarks/results/<timestamp>/`. It covers batch sizes 1/25/100 and concurrency 1/4/10 by default. These are extension/HTTP measurements, **not Jev latency or semantic accuracy claims**. Deterministic tests compare complete Choice, Score and Noul answers across batch sizes. See [real Jev results](docs/live-results.md), [local benchmark results](docs/benchmark-results.md) and the [independent performance review](docs/performance-review.md).
 
 Tests cover all primitives, mixed questions, constant/dictionary/flat vectors, nested nulls, multiple chunks, connection reuse, byte caps, oversized expanded payloads, response order, concurrency across connections, scheduler fairness, cancellation, timeout, queued failures, malformed outputs, query-cache budgets, statement/connection isolation, prepared execution, and cross-expression reuse.
 
-Two explicitly opt-in tests contact TypeSafe: one scalar request with three questions and one streaming request with two rows (five questions total):
+Three explicitly opt-in tests contact TypeSafe: a scalar primitive smoke test, a streaming smoke test and a cross-row equivalence test that compares Choice, Score, Noul, confidence and probability outputs at batch sizes 1, 10, 25 and 100:
 
-For measured live runs (billable, explicitly bounded, no retries):
+For measured live runs (billable and explicitly bounded):
 
 ```sh
 uv run python -m benchmarks.live --live
@@ -196,7 +228,7 @@ The scalar test saves its small response to `benchmarks/results/live-smoke.json`
 
 ## Current limits
 
-This is a working local native extension, not a signed/published community extension. No automatic discovery of tables, shared or disk-backed cache, DuckDB secret-provider integration, request-usage SQL metrics relation, or automatic retries have been added. The [original design](docs/design.md) is a proposal; this README describes what is implemented. Scalar functions remain synchronous per chunk. Use `jev_stream` for bounded input prefetch, cross-chunk request packing, and overlapping HTTP work. Stub tests prove transport/mapping correctness, not model equivalence across all batch sizes; the small live smoke confirms protocol compatibility only.
+This is a native extension distributed through GitHub Releases, not yet a signed DuckDB Community Extension. GitHub attestations establish release-archive provenance, but DuckDB still treats the contained extension as unsigned. There is no automatic discovery of tables or shared/disk-backed cache. The [original design](docs/design.md) is a proposal; this README describes what is implemented. Scalar functions remain synchronous per chunk. Use `jev_stream` for bounded input prefetch, cross-chunk request packing and overlapping HTTP work.
 
 
 The current artifact targets native DuckDB, not DuckDB-Wasm. A Wasm port requires a matching Wasm extension build plus browser-compatible transport, scheduling, and credentials. See [DuckDB-Wasm extension documentation](https://duckdb.org/docs/current/clients/wasm/extensions).

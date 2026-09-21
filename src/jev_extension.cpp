@@ -1,19 +1,25 @@
 #define DUCKDB_EXTENSION_MAIN
 #include "duckdb.hpp"
+#include "duckdb/catalog/catalog_transaction.hpp"
 #include "duckdb/execution/expression_executor_state.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/client_context_state.hpp"
 #include "duckdb/main/config.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb/main/secret/secret.hpp"
+#include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "json.hpp"
 #include "mbedtls_wrapper.hpp"
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstdlib>
+#include <ctime>
 #include <curl/curl.h>
 #include <deque>
 #include <functional>
@@ -21,6 +27,7 @@
 #include <list>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <thread>
 #include <unordered_map>
 
@@ -34,6 +41,27 @@ static unsigned active_calls = 0;
 static std::unordered_map<ClientContext *, unsigned> query_calls;
 static constexpr unsigned GLOBAL_LIMIT = 10;
 static std::once_flag curl_once;
+
+struct MetricsCounters {
+  std::atomic<uint64_t> requests{0};
+  std::atomic<uint64_t> questions{0};
+  std::atomic<uint64_t> cache_hits{0};
+  std::atomic<uint64_t> retries{0};
+  std::atomic<uint64_t> errors{0};
+  std::atomic<uint64_t> input_tokens{0};
+  std::atomic<uint64_t> output_tokens{0};
+  std::atomic<uint64_t> request_bytes{0};
+  std::atomic<uint64_t> response_bytes{0};
+  std::atomic<uint64_t> total_latency_us{0};
+  std::atomic<uint64_t> max_latency_us{0};
+};
+static MetricsCounters metrics;
+
+static void AtomicMax(std::atomic<uint64_t> &target, uint64_t value) {
+  auto current = target.load();
+  while (current < value && !target.compare_exchange_weak(current, value)) {
+  }
+}
 
 static void Fail(const std::string &message) {
   throw InvalidInputException("jev: " + message);
@@ -159,21 +187,68 @@ static Value Setting(ClientContext &ctx, const string &name) {
 }
 struct Options {
   string model, endpoint, key;
-  size_t questions, bytes, cache_bytes, session_bytes;
+  size_t questions, bytes, cache_bytes, session_bytes, max_query_questions,
+      max_query_requests;
   int64_t session_ttl;
   unsigned concurrency;
-  long timeout;
+  long timeout, retries, retry_base_ms, retry_max_delay_ms;
 };
 static string Trim(string s) {
   auto begin = s.find_first_not_of(" \t\r\n"),
        end = s.find_last_not_of(" \t\r\n");
   return begin == string::npos ? "" : s.substr(begin, end - begin + 1);
 }
-static string Key() {
+struct JevSecretOptions {
+  string key, endpoint, model;
+};
+static void CopySecretOption(const string &name, const CreateSecretInput &input,
+                             KeyValueSecret &secret) {
+  auto value = input.options.find(name);
+  if (value != input.options.end())
+    secret.secret_map[name] = value->second;
+}
+static unique_ptr<BaseSecret> CreateJevSecret(ClientContext &,
+                                              CreateSecretInput &input) {
+  auto secret = make_uniq<KeyValueSecret>(input.scope, input.type,
+                                          input.provider, input.name);
+  CopySecretOption("api_key", input, *secret);
+  CopySecretOption("endpoint", input, *secret);
+  CopySecretOption("model", input, *secret);
+  secret->redact_keys.insert("api_key");
+  return secret;
+}
+static void RegisterJevSecret(ExtensionLoader &loader) {
+  SecretType type;
+  type.name = "jev";
+  type.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;
+  type.default_provider = "config";
+  loader.RegisterSecretType(type);
+  CreateSecretFunction function{"jev", "config", CreateJevSecret};
+  function.named_parameters["api_key"] = LogicalType::VARCHAR;
+  function.named_parameters["endpoint"] = LogicalType::VARCHAR;
+  function.named_parameters["model"] = LogicalType::VARCHAR;
+  loader.RegisterFunction(function);
+}
+static JevSecretOptions Secret(ClientContext &ctx) {
+  JevSecretOptions result;
+  auto &manager = SecretManager::Get(ctx);
+  auto transaction = CatalogTransaction::GetSystemCatalogTransaction(ctx);
+  auto match = manager.LookupSecret(transaction, "jev", "jev");
+  if (!match.HasMatch())
+    return result;
+  const auto &secret = dynamic_cast<const KeyValueSecret &>(match.GetSecret());
+  Value value;
+  if (secret.TryGetValue("api_key", value) && !value.IsNull())
+    result.key = value.ToString();
+  if (secret.TryGetValue("endpoint", value) && !value.IsNull())
+    result.endpoint = value.ToString();
+  if (secret.TryGetValue("model", value) && !value.IsNull())
+    result.model = value.ToString();
+  return result;
+}
+static string EnvironmentKey() {
   const auto env = std::getenv("TYPESAFE_API_KEY");
   const string key = env ? Trim(env) : "";
-  if (key.empty() || key.find_first_of("\r\n") != string::npos)
-    Fail("TYPESAFE_API_KEY is not configured or invalid");
   return key;
 }
 static Options ReadOptions(ClientContext &ctx) {
@@ -182,14 +257,29 @@ static Options ReadOptions(ClientContext &ctx) {
   Options o;
   o.model = Setting(ctx, "jev_model").GetValue<string>();
   o.endpoint = Setting(ctx, "jev_endpoint").GetValue<string>();
+  const auto secret = Secret(ctx);
+  if (!secret.model.empty())
+    o.model = secret.model;
+  if (!secret.endpoint.empty())
+    o.endpoint = secret.endpoint;
   auto q = Setting(ctx, "jev_batch_size").GetValue<int64_t>();
   auto b = Setting(ctx, "jev_max_request_bytes").GetValue<int64_t>();
   auto c = Setting(ctx, "jev_concurrency").GetValue<int64_t>();
   auto t = Setting(ctx, "jev_timeout_ms").GetValue<int64_t>();
+  auto retries = Setting(ctx, "jev_max_retries").GetValue<int64_t>();
+  auto retry_base = Setting(ctx, "jev_retry_base_ms").GetValue<int64_t>();
+  auto retry_max = Setting(ctx, "jev_retry_max_delay_ms").GetValue<int64_t>();
+  auto max_questions =
+      Setting(ctx, "jev_max_questions_per_query").GetValue<int64_t>();
+  auto max_requests =
+      Setting(ctx, "jev_max_requests_per_query").GetValue<int64_t>();
   if (q < 1 || q > 1000 || b < 256 || b > 1048576 || c < 1 || c > 10 || t < 1 ||
-      t > 300000 || o.model.empty())
+      t > 300000 || retries < 0 || retries > 5 || retry_base < 1 ||
+      retry_base > 10000 || retry_max < retry_base || retry_max > 60000 ||
+      max_questions < 1 || max_questions > 100000000 || max_requests < 1 ||
+      max_requests > 10000000 || o.model.empty())
     Fail("invalid Jev settings (batch 1-1000, bytes 256-1048576, concurrency "
-         "1-10, timeout 1-300000ms)");
+         "1-10, timeout 1-300000ms, retries 0-5, and positive query budgets)");
   if (o.endpoint.rfind("https://", 0) != 0 &&
       o.endpoint.rfind("http://127.0.0.1:", 0) != 0 &&
       o.endpoint.rfind("http://localhost:", 0) != 0)
@@ -211,7 +301,15 @@ static Options ReadOptions(ClientContext &ctx) {
   o.bytes = b;
   o.concurrency = c;
   o.timeout = t;
-  o.key = Key();
+  o.retries = retries;
+  o.retry_base_ms = retry_base;
+  o.retry_max_delay_ms = retry_max;
+  o.max_query_questions = max_questions;
+  o.max_query_requests = max_requests;
+  o.key = secret.key.empty() ? EnvironmentKey() : Trim(secret.key);
+  if (o.key.empty() || o.key.find_first_of("\r\n") != string::npos)
+    Fail("no valid Jev credential; run CREATE SECRET (TYPE jev, API_KEY '...') "
+         "or set TYPESAFE_API_KEY");
   return o;
 }
 // QueryEnd clears the configuration/key snapshot and query results; the opt-in
@@ -240,6 +338,7 @@ class QueryState : public ClientContextState {
   std::list<string> lru;
   string session_scope;
   size_t session_bytes = 0, session_budget = 0;
+  size_t query_questions = 0, query_requests = 0;
   int64_t session_ttl = 0;
   void ClearSessionLocked() {
     session.clear();
@@ -332,6 +431,15 @@ public:
     }
     return {f, true};
   }
+  void Reserve(size_t questions, size_t requests, const Options &limits) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (questions > limits.max_query_questions - query_questions)
+      Fail("query exceeds jev_max_questions_per_query before request dispatch");
+    if (requests > limits.max_query_requests - query_requests)
+      Fail("query exceeds jev_max_requests_per_query before request dispatch");
+    query_questions += questions;
+    query_requests += requests;
+  }
   void Release(const std::shared_ptr<Flight> &f) {
     std::lock_guard<std::mutex> lock(mutex);
     auto it = flights.find(f->key);
@@ -379,6 +487,8 @@ public:
     flight_bytes = 0;
     options.reset();
     bytes = 0;
+    query_questions = 0;
+    query_requests = 0;
   }
 };
 struct FlightGuard {
@@ -404,6 +514,7 @@ struct Transfer {
   string body;
   ClientContext *context;
   std::atomic<bool> *stopped;
+  int64_t retry_after_ms = -1;
 };
 static size_t Write(char *data, size_t size, size_t nmemb, void *ptr) {
   auto &t = *static_cast<Transfer *>(ptr);
@@ -416,6 +527,38 @@ static size_t Write(char *data, size_t size, size_t nmemb, void *ptr) {
     return 0;
   }
   return n;
+}
+static size_t Header(char *data, size_t size, size_t nmemb, void *ptr) {
+  auto &t = *static_cast<Transfer *>(ptr);
+  const auto count = size * nmemb;
+  string line(data, count);
+  auto colon = line.find(':');
+  if (colon == string::npos)
+    return count;
+  auto name = line.substr(0, colon);
+  std::transform(name.begin(), name.end(), name.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  if (name != "retry-after")
+    return count;
+  auto value = Trim(line.substr(colon + 1));
+  try {
+    size_t consumed = 0;
+    const auto seconds = std::stoll(value, &consumed);
+    if (consumed == value.size() && seconds >= 0)
+      t.retry_after_ms = std::min<int64_t>(seconds * 1000, 60000);
+    else {
+      const auto when = curl_getdate(value.c_str(), nullptr);
+      const auto now = std::time(nullptr);
+      if (when >= now)
+        t.retry_after_ms = std::min<int64_t>((when - now) * 1000, 60000);
+    }
+  } catch (...) {
+    const auto when = curl_getdate(value.c_str(), nullptr);
+    const auto now = std::time(nullptr);
+    if (when >= now)
+      t.retry_after_ms = std::min<int64_t>((when - now) * 1000, 60000);
+  }
+  return count;
 }
 static int Progress(void *ptr, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
   auto &t = *static_cast<Transfer *>(ptr);
@@ -448,10 +591,29 @@ struct Gate {
     }
   }
 };
-static Json Request(CURL *curl, const string &payload, const Options &o,
-                    ClientContext &ctx, std::atomic<bool> &stop) {
+static bool Retryable(CURLcode code, long status) {
+  if (code == CURLE_OK)
+    return status == 429 || (status >= 500 && status <= 599);
+  return code == CURLE_OPERATION_TIMEDOUT || code == CURLE_COULDNT_CONNECT ||
+         code == CURLE_COULDNT_RESOLVE_HOST || code == CURLE_SEND_ERROR ||
+         code == CURLE_RECV_ERROR || code == CURLE_GOT_NOTHING ||
+         code == CURLE_PARTIAL_FILE;
+}
+static void RetryWait(ClientContext &ctx, std::atomic<bool> &stop,
+                      int64_t delay_ms) {
+  auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(delay_ms);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (ctx.IsInterrupted() || stop.load())
+      Fail("query cancelled");
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+}
+static Json Request(CURL *curl, const string &payload, size_t question_count,
+                    const Options &o, ClientContext &ctx,
+                    std::atomic<bool> &stop) {
   Gate gate(ctx, stop, o.concurrency);
-  Transfer transfer{"", &ctx, &stop};
+  Transfer transfer{"", &ctx, &stop, -1};
   curl_easy_reset(curl);
   struct curl_slist *headers = nullptr;
   headers = curl_slist_append(headers, "Content-Type: application/json");
@@ -470,19 +632,71 @@ static Json Request(CURL *curl, const string &payload, const Options &o,
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Write);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &transfer);
+  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, Header);
+  curl_easy_setopt(curl, CURLOPT_HEADERDATA, &transfer);
   curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
   curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, Progress);
   curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &transfer);
-  auto code = curl_easy_perform(curl);
+  metrics.requests++;
+  metrics.questions += question_count;
+  const auto started = std::chrono::steady_clock::now();
+  const auto record_latency = [&]() {
+    const auto latency = std::chrono::duration_cast<std::chrono::microseconds>(
+                             std::chrono::steady_clock::now() - started)
+                             .count();
+    metrics.total_latency_us += latency;
+    AtomicMax(metrics.max_latency_us, latency);
+  };
+  CURLcode code = CURLE_OK;
   long status = 0;
-  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-  if (code != CURLE_OK)
-    Fail("HTTP transport failed (code " + std::to_string(code) + "); no retry");
-  if (status != 200)
-    Fail("HTTP status " + std::to_string(status) + "; no retry");
+  for (long attempt = 0;; attempt++) {
+    transfer.body.clear();
+    transfer.retry_after_ms = -1;
+    status = 0;
+    metrics.request_bytes += payload.size();
+    code = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    metrics.response_bytes += transfer.body.size();
+    if (code == CURLE_OK && status == 200)
+      break;
+    if (attempt >= o.retries || !Retryable(code, status)) {
+      metrics.errors++;
+      record_latency();
+      if (code != CURLE_OK)
+        Fail("HTTP transport failed (code " + std::to_string(code) +
+             ") after " + std::to_string(attempt + 1) + " attempt(s)");
+      Fail("HTTP status " + std::to_string(status) + " after " +
+           std::to_string(attempt + 1) + " attempt(s)");
+    }
+    metrics.retries++;
+    const auto exponential = std::min<int64_t>(
+        o.retry_base_ms * (int64_t{1} << attempt), o.retry_max_delay_ms);
+    const auto jitter_range = std::max<int64_t>(1, exponential / 4);
+    const auto jitter = static_cast<int64_t>(
+        (std::chrono::steady_clock::now().time_since_epoch().count() ^
+         std::hash<std::thread::id>{}(std::this_thread::get_id())) %
+        jitter_range);
+    const auto delay =
+        std::min<int64_t>(transfer.retry_after_ms >= 0 ? transfer.retry_after_ms
+                                                       : exponential + jitter,
+                          o.retry_max_delay_ms);
+    RetryWait(ctx, stop, delay);
+  }
+  record_latency();
   try {
-    return Json::parse(transfer.body);
+    auto response = Json::parse(transfer.body);
+    if (response.contains("usage") && response["usage"].is_object()) {
+      const auto &reported = response["usage"];
+      if (reported.contains("input_tokens") &&
+          reported["input_tokens"].is_number_unsigned())
+        metrics.input_tokens += reported["input_tokens"].get<uint64_t>();
+      if (reported.contains("output_tokens") &&
+          reported["output_tokens"].is_number_unsigned())
+        metrics.output_tokens += reported["output_tokens"].get<uint64_t>();
+    }
+    return response;
   } catch (...) {
+    metrics.errors++;
     Fail("provider returned invalid JSON");
   }
   return nullptr;
@@ -826,7 +1040,8 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
       if (!curl)
         Fail("curl allocation failed");
       auto &pack = packs[i];
-      auto response = Request(curl, pack.payload, o, ctx, stopped);
+      auto response =
+          Request(curl, pack.payload, pack.refs.size(), o, ctx, stopped);
       if (!response.is_object() || !ValidModel(response) ||
           !response.contains("answers") || !response["answers"].is_object() ||
           response["answers"].size() != pack.refs.size())
@@ -854,6 +1069,10 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
     }
   };
   try {
+    size_t dispatched_questions = 0;
+    for (const auto &pack : packs)
+      dispatched_questions += pack.refs.size();
+    query->Reserve(dispatched_questions, packs.size(), o);
     for (size_t i = 0; i < packs.size() && !stopped.load(); i++)
       futures.push_back(Pool().Submit([&, i](CURL *curl) { process(i, curl); },
                                       ctx, o.concurrency));
@@ -920,6 +1139,7 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
     values.emplace_back("cache_hit", Value(hit[r]));
     result.SetValue(r, Value::STRUCT(std::move(values)));
   }
+  metrics.cache_hits += std::count(hit.begin(), hit.end(), true);
 }
 static LogicalType ReturnType(const string &name) {
   if (name == "jev")
@@ -945,8 +1165,55 @@ static LogicalType ReturnType(const string &name) {
 }
 #include "jev_stream.hpp"
 
+struct StatsState : public GlobalTableFunctionState {
+  bool emitted = false;
+};
+static unique_ptr<FunctionData> StatsBind(ClientContext &,
+                                          TableFunctionBindInput &,
+                                          vector<LogicalType> &types,
+                                          vector<string> &names) {
+  names = {"requests",         "questions",     "cache_hits",
+           "retries",          "errors",        "input_tokens",
+           "output_tokens",    "request_bytes", "response_bytes",
+           "total_latency_ms", "max_latency_ms"};
+  types.assign(9, LogicalType::UBIGINT);
+  types.push_back(LogicalType::DOUBLE);
+  types.push_back(LogicalType::DOUBLE);
+  return nullptr;
+}
+static unique_ptr<GlobalTableFunctionState>
+StatsInit(ClientContext &, TableFunctionInitInput &) {
+  return make_uniq<StatsState>();
+}
+static void StatsScan(ClientContext &, TableFunctionInput &input,
+                      DataChunk &output) {
+  auto &state = input.global_state->Cast<StatsState>();
+  if (state.emitted)
+    return;
+  state.emitted = true;
+  const uint64_t counters[] = {
+      metrics.requests.load(),      metrics.questions.load(),
+      metrics.cache_hits.load(),    metrics.retries.load(),
+      metrics.errors.load(),        metrics.input_tokens.load(),
+      metrics.output_tokens.load(), metrics.request_bytes.load(),
+      metrics.response_bytes.load()};
+  for (idx_t i = 0; i < 9; i++)
+    output.SetValue(i, 0, Value::UBIGINT(counters[i]));
+  output.SetValue(
+      9, 0, Value(static_cast<double>(metrics.total_latency_us.load()) / 1000.0));
+  output.SetValue(
+      10, 0, Value(static_cast<double>(metrics.max_latency_us.load()) / 1000.0));
+  output.SetCardinality(1);
+}
+static void RegisterStats(ExtensionLoader &loader) {
+  TableFunction function("jev_stats", {}, StatsScan, StatsBind, StatsInit);
+  loader.RegisterFunction(function);
+}
+
 static void Load(ExtensionLoader &loader) {
+  RegisterJevSecret(loader);
   RegisterStream(loader);
+  RegisterStats(loader);
   ScalarFunction clear(
       "jev_cache_clear", {}, LogicalType::BOOLEAN,
       [](DataChunk &args, ExpressionState &state, Vector &result) {
@@ -983,8 +1250,25 @@ static void Load(ExtensionLoader &loader) {
   config.AddExtensionOption("jev_concurrency",
                             "Concurrent requests (global ceiling 10)",
                             LogicalType::BIGINT, Value::BIGINT(10));
-  config.AddExtensionOption("jev_timeout_ms", "HTTP timeout; retries disabled",
+  config.AddExtensionOption("jev_timeout_ms", "HTTP timeout per attempt",
                             LogicalType::BIGINT, Value::BIGINT(30000));
+  config.AddExtensionOption(
+      "jev_max_retries", "Retries for transient transport, 429 and 5xx errors",
+      LogicalType::BIGINT, Value::BIGINT(2));
+  config.AddExtensionOption("jev_retry_base_ms",
+                            "Initial exponential retry delay",
+                            LogicalType::BIGINT, Value::BIGINT(100));
+  config.AddExtensionOption("jev_retry_max_delay_ms",
+                            "Maximum retry delay including Retry-After",
+                            LogicalType::BIGINT, Value::BIGINT(5000));
+  config.AddExtensionOption(
+      "jev_max_questions_per_query",
+      "Maximum billable questions dispatched by one query", LogicalType::BIGINT,
+      Value::BIGINT(100000));
+  config.AddExtensionOption(
+      "jev_max_requests_per_query",
+      "Maximum logical HTTP requests dispatched by one query",
+      LogicalType::BIGINT, Value::BIGINT(2000));
   for (string name :
        {"jev", "jev_noul", "jev_choice", "jev_score", "jev_eval"}) {
     ScalarFunctionSet set(name);

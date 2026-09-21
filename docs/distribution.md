@@ -14,7 +14,7 @@ sha256sum -c jev-v0.1.0-duckdb-v1.5.5-linux_amd64.tar.gz.sha256
 tar -xzf jev-v0.1.0-duckdb-v1.5.5-linux_amd64.tar.gz
 ```
 
-Each archive contains the extension, a compatibility manifest, documentation, the Apache 2.0 project license and NOTICE, and dependency license notices. Pin the release and checksum in deployment builds; install runtime libraries and copy the extension into the image. Supply `TYPESAFE_API_KEY` only at runtime.
+Each archive contains the extension, a compatibility manifest, an SPDX 2.3 SBOM, documentation, the Apache 2.0 project license and NOTICE, and dependency license notices. Pin the release and checksum in deployment builds; install runtime libraries and copy the extension into the image. Supply credentials only at runtime, either through a DuckDB `jev` secret or `TYPESAFE_API_KEY`.
 
 These binaries are unsigned. Enable unsigned extensions only in a trusted DuckDB runtime, then load the verified local file:
 
@@ -31,4 +31,4 @@ Publishing to GitHub Releases does not sign an extension or register it in DuckD
 
 Run **Build and release native extension** with a new semantic version tag (for example `v0.1.0`), or push that tag. The workflow builds and tests all four platforms without paid inference, packages each binary with checksums, and publishes only after all builds succeed. Manual dispatch creates the tag during publication. Existing published releases cannot be overwritten by the workflow; failed draft uploads can be retried.
 
-The workflow badge reports GitHub's build status. Platform badges describe build targets, not a claim that every release has passed. GitHub-hosted badges for a private repository may require access or fail to render in unauthenticated viewers; no access token is embedded in the README.
+The workflow badge reports GitHub's build status. Platform badges describe build targets, not a claim that every release has passed. Published archives also receive a GitHub build-provenance attestation; this establishes archive provenance but does not make the contained DuckDB extension a signed Community Extension.

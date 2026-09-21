@@ -30,6 +30,8 @@ class Stub:
         self.peak = 0
         self.delay = 0.0
         self.status = 200
+        self.status_sequence: list[int] = []
+        self.retry_after: str | None = None
         self.mode = "normal"
         owner = self
 
@@ -53,7 +55,15 @@ class Stub:
                 body = self.rfile.read(int(self.headers["Content-Length"]))
                 data = json.loads(body)
                 with owner.lock:
-                    owner.calls.append({"body": data, "bytes": len(body)})
+                    status = owner.status_sequence.pop(0) if owner.status_sequence else owner.status
+                    owner.calls.append(
+                        {
+                            "body": data,
+                            "bytes": len(body),
+                            "authorization": self.headers.get("Authorization"),
+                            "status": status,
+                        }
+                    )
                     owner.sockets.add(self.client_address)
                     owner.active += 1
                     owner.peak = max(owner.peak, owner.active)
@@ -107,8 +117,10 @@ class Stub:
                     with owner.lock:
                         owner.active -= 1
                     processing = False
-                    self.send_response(owner.status)
+                    self.send_response(status)
                     self.send_header("Content-Type", "application/json")
+                    if owner.retry_after is not None:
+                        self.send_header("Retry-After", owner.retry_after)
                     self.send_header("Content-Length", str(len(response)))
                     self.end_headers()
                     self.wfile.write(response)
