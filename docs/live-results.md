@@ -37,6 +37,17 @@ Per-HTTP-request p50/p95 over the main run: 147ms / 281ms. These combine differe
 
 For 2,049 unique rows at batch 100/concurrency 10: scalar 1.328s, stream 0.991s; both made 21 requests in this input-table scan. For 4,097 rows containing 10 unique inputs: one request and 4,087 reused rows on each path. Scalar with query cache disabled made 3 requests (chunk dedup remains enabled).
 
+## 1,000-row Choice scaling run
+
+Three fresh repetitions used `jev_stream` with one finite-label Choice question per unique nested JSON row. All expected labels matched, and all 150 API responses were HTTP 200.
+
+| Batch | Concurrency | Requests/query | Median query time | Median throughput |
+|---:|---:|---:|---:|---:|
+| 25 | 10 | 40 | 0.964s | 1,037 rows/s |
+| 100 | 10 | 10 | 0.515s | 1,943 rows/s |
+
+Batch 100 creates exactly ten requests for 1,000 rows, allowing the configured ten-way HTTP concurrency to be fully occupied without additional waves.
+
 ## Repeated-query cache: 129 rows
 
 Batch 25/concurrency 10; three cold/warm pairs per path. Connection cache 8MiB, TTL 60s. Cache explicitly cleared before each cold query.
@@ -53,6 +64,7 @@ Offline Parquet reuse: **129/129 rows**, **8.11ms**, zero HTTP requests, new Duc
 The fresh main run used **1,327 requests /7,750 judgments**. Provider-reported token totals: `{"input_tokens": 2284256, "output_tokens": 328857}`. Cache results below come from the separate 2026-09-18 run. Dollar cost is not inferred from token totals without verified billing rates.
 
 - Main raw inputs/outputs, request ledger, timings and binary fingerprint: `benchmarks/results/live-20260921T030147262719Z`.
+- 1,000-row Choice scaling trials: `benchmarks/results/live-scale-20260921T032315156626Z`.
 - Cache trials, request ledger, summary and reusable `enriched.parquet`: `benchmarks/results/live-cache-20260918T062635911271Z`.
 
 Raw generated artifacts are local and git-ignored. This report and runnable harnesses are tracked. All runs terminate; no paid feed or background inference service remains.

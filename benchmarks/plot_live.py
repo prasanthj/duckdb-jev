@@ -20,7 +20,7 @@ def load_trials(result_dir: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in (result_dir / "trials.jsonl").read_text().splitlines() if line.strip()]
 
 
-def render(result_dir: Path, output: Path) -> None:
+def render(result_dir: Path, output: Path, scale_result_dir: Path | None = None) -> None:
     trials = load_trials(result_dir)
     configs = [(1, 1), (1, 10), (25, 1), (25, 10), (100, 10)]
     rows: list[dict[str, float | int | str]] = []
@@ -50,6 +50,11 @@ def render(result_dir: Path, output: Path) -> None:
     summary = json.loads((result_dir / "summary.json").read_text())
     best = min(rows, key=lambda row: float(row["latency"]))
     speedup = float(rows[0]["latency"]) / float(best["latency"])
+    thousand_latency: float | None = None
+    if scale_result_dir is not None:
+        scale_summary = json.loads((scale_result_dir / "summary.json").read_text())
+        thousand = next(result for result in scale_summary["results"] if result["batch"] == 100)
+        thousand_latency = float(thousand["median_query_seconds"])
 
     width, height = 1440, 900
     left, right = 390, 1330
@@ -61,8 +66,8 @@ def render(result_dir: Path, output: Path) -> None:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         '<rect width="100%" height="100%" rx="28" fill="#f7f8f4"/>',
         '<rect x="48" y="42" width="1344" height="816" rx="24" fill="#ffffff" stroke="#dde3dc" stroke-width="2"/>',
-        text(92, 112, "Jev × DuckDB: live batching performance", 42, 720),
-        text(92, 158, "100 unique nested JSON rows · real Jev API · median of 3 runs", 23, 450, "#526159"),
+        text(92, 112, "Jev × DuckDB: live Choice batching performance", 42, 720),
+        text(92, 158, "Finite-label classification · nested JSON evidence · real Jev API · median of 3 runs", 23, 450, "#526159"),
         text(92, 205, "Median query latency — lower is better (log scale)", 25, 650),
     ]
 
@@ -85,25 +90,28 @@ def render(result_dir: Path, output: Path) -> None:
             ]
         )
 
-    cards = [
-        (92, f"{speedup:.0f}×", "faster than one-at-a-time"),
-        (515, f"{float(best['latency']):.3f}s", "fastest 100-row query"),
-        (938, f"{float(scale['query_seconds']):.3f}s", f"{int(scale['rows']):,} unique rows"),
-    ]
+    cards = [(92, f"{speedup:.0f}×", "faster than one-at-a-time"), (410, f"{float(best['latency']):.3f}s", "100 unique rows")]
+    if thousand_latency is not None:
+        cards.append((728, f"{thousand_latency:.3f}s", "1,000 unique rows"))
+    cards.append((1046, f"{float(scale['query_seconds']):.3f}s", f"{int(scale['rows']):,} unique rows"))
     for x, value, label in cards:
         parts.extend(
             [
-                f'<rect x="{x}" y="762" width="360" height="70" rx="14" fill="#edf5f0"/>',
+                f'<rect x="{x}" y="762" width="280" height="70" rx="14" fill="#edf5f0"/>',
                 text(x + 20, 794, value, 27, 750, "#08754f"),
                 text(x + 20, 819, label, 16, 500, "#53645a"),
             ]
         )
     transient = sum(int(count) for status, count in summary["http_statuses"].items() if status != "200")
+    footer = (
+        f"DuckDB 1.5.5 · Jev {summary['models'][0]} · macOS arm64 · matrix: {transient} transient retries · "
+        "1,000-row run: 150/150 HTTP 200"
+    )
     parts.append(
         text(
             92,
             852,
-            f"DuckDB 1.5.5 · Jev {summary['models'][0]} · macOS arm64 · {transient} transient response(s) retried successfully",
+            footer,
             16,
             450,
             "#6a756f",
@@ -118,8 +126,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("result_dir", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--scale-result", type=Path)
     args = parser.parse_args()
-    render(args.result_dir, args.output)
+    render(args.result_dir, args.output, args.scale_result)
 
 
 if __name__ == "__main__":

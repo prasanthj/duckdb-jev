@@ -21,9 +21,9 @@ High-throughput, robust native C++ DuckDB extension for semantic predicates, cla
 
 ## Live performance
 
-![Live Jev batching performance: median latency for 100 nested JSON rows across batch and concurrency settings](docs/images/live-performance.svg)
+![Live Jev Choice performance: batching matrix for 100 rows and scaling results through 2,049 rows](docs/images/live-performance.svg)
 
-Fresh real-API run on macOS arm64 with DuckDB 1.5.5 and `jev-1.13.0`. For 100 unique nested JSON rows, `jev_stream` at batch 25/concurrency 10 completed in a **0.211s median**, compared with **16.828s** one row at a time. A separate 2,049-unique-row run completed in **0.991s**. Times include SQL execution, fetch, ordering, and the instrumentation relay. The fixed 12-template corpus is useful for throughput and regression testing, not a production accuracy estimate. Two transient upstream responses were retried successfully. See the [method and full results](docs/live-results.md).
+Fresh real-API Choice-classification runs on macOS arm64 with DuckDB 1.5.5 and `jev-1.13.0`. For 100 unique nested JSON rows, `jev_stream` at batch 25/concurrency 10 completed in a **0.211s median**, compared with **16.828s** one row at a time. At batch 100/concurrency 10, **1,000 rows completed in a 0.515s median** and 2,049 rows completed in **0.991s**. Times include SQL execution, fetch, ordering, and the instrumentation relay. The fixed 12-template corpus is useful for throughput and regression testing, not a production accuracy estimate. Two transient upstream responses in the 100-row matrix were retried successfully; all 150 responses in the 1,000-row run were HTTP 200. See the [method and full results](docs/live-results.md).
 
 ![Animated terminal walkthrough: nested account evidence, renewal-risk classification with confidence, and cached query reuse](docs/images/terminal-demo.gif)
 
@@ -221,11 +221,13 @@ For measured live runs (billable and explicitly bounded):
 
 ```sh
 uv run python -m benchmarks.live --live
+uv run python -m benchmarks.live_scale --live --rows 1000
 uv run python -m benchmarks.live_cache --live
-uv run python -m benchmarks.plot_live benchmarks/results/<live-run> docs/images/live-performance.svg
+uv run python -m benchmarks.plot_live benchmarks/results/<live-run> docs/images/live-performance.svg \
+  --scale-result benchmarks/results/<live-scale-run>
 ```
 
-The first run caps itself at 1500 HTTP requests / 12000 questions by default. It saves inputs, outputs, per-request timing/usage, per-query results and summaries. The second caps at 40 requests / 800 questions and compares first runs, cached repeats, and offline Parquet reuse. Both read `TYPESAFE_API_KEY` only. Timing includes the loopback instrumentation relay; it is not a pure provider-internal latency measure.
+The main run caps itself at 1500 HTTP requests / 12000 questions by default. The 1,000-row scaling run is limited to 200 requests / 8000 questions, and the cache run is limited to 40 requests / 800 questions. They save inputs or manifests, request ledgers, per-query results and summaries; the cache run also compares cached repeats and offline Parquet reuse. All read `TYPESAFE_API_KEY` only. Timing includes the loopback instrumentation relay; it is not a pure provider-internal latency measure.
 
 ```sh
 JEV_RUN_LIVE=1 uv run pytest -q tests/test_live.py
