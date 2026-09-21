@@ -42,6 +42,12 @@ For 100 rows, batch 25 is fastest because its four requests overlap. For 1,000 r
 
 The 100- and 1,000-row figures are medians of three complete queries and include DuckDB execution, fetch, ordering, relay instrumentation, network time, and Jev inference. The fixed 12-template corpus tests throughput and regression behavior; matching its expected labels is not a general accuracy claim. Two transient responses in the 100-row one-at-a-time matrix were retried successfully. All 150 responses in the 1,000-row run were HTTP 200. See the [method, complete matrix, request percentiles, and raw-artifact locations](docs/live-results.md).
 
+### Separate live terminal capture
+
+![Live terminal capture: 2,049 Jev Choice classifications followed by a cross-query cached replay](docs/images/performance-demo.gif)
+
+This VHS capture is a separate direct-to-Jev run, not a data point from the graph above. It classified 2,049 distinct serialized rows in 0.887s (2,311 rows/s) using batch size 205 and concurrency 10, then replayed the same query from the connection TTL/LRU cache in 28.6ms with zero API requests. The synthetic corpus repeats 12 clear support-ticket templates with unique IDs, account data and telemetry; it validates throughput, batching, row correlation and cache reuse rather than general classification accuracy. Results vary with input size, network conditions and service load. Reproduce it with `vhs examples/performance_demo.tape`.
+
 Implemented and tested with DuckDB **1.4.5** and **1.5.5**. The built artifact is `build/extension/jev/jev.duckdb_extension`. Native C++ extensions must match DuckDB's version and platform; each version/platform combination needs its own build and verification.
 
 Prebuilt archives are published through [GitHub Releases](https://github.com/prasanthj/duckdb-jev/releases) after all eight version/platform builds pass. See [distribution and installation](docs/distribution.md) for compatibility, checksums, and release instructions.
