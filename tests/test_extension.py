@@ -29,6 +29,24 @@ def test_null_and_explain_never_call(db: duckdb.DuckDBPyConnection, stub: Stub) 
     assert not stub.calls
 
 
+def test_null_struct_result_has_null_children(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
+    """A NULL judgment must not expose fabricated values through struct extraction."""
+    choice = db.execute(
+        "SELECT result IS NULL, result.choice IS NULL, result.confidence IS NULL, "
+        "result.probabilities IS NULL, result.model IS NULL, result.cache_hit IS NULL "
+        "FROM (SELECT jev_choice(NULL::VARCHAR, 'route', "
+        "'{\"billing\":null,\"technical\":null}'::JSON) AS result)"
+    ).fetchone()
+    evaluated = db.execute(
+        "SELECT result IS NULL, result.answers IS NULL, result.model IS NULL, result.cache_hit IS NULL "
+        "FROM (SELECT jev_eval(NULL::VARCHAR, "
+        "'{\"urgent\":{\"type\":\"noul\",\"instructions\":\"urgent?\"}}'::JSON) AS result)"
+    ).fetchone()
+    assert choice == (True, True, True, True, True, True)
+    assert evaluated == (True, True, True, True)
+    assert not stub.calls
+
+
 def test_constant_dedup_and_threshold(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
     rows = db.execute("SELECT jev_noul('same','urgent?') FROM range(100)").fetchall()
     assert all(r[0]["noul"] == 0.9 for r in rows)
