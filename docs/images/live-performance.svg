@@ -1,53 +1,68 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1150" viewBox="0 0 1440 1150">
 <rect width="100%" height="100%" rx="28" fill="#f7f8f4"/>
-<rect x="48" y="42" width="1344" height="816" rx="24" fill="#ffffff" stroke="#dde3dc" stroke-width="2"/>
-<text x="92" y="112" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="42" font-weight="720" fill="#17231d">Jev × DuckDB: live Choice batching performance</text>
-<text x="92" y="158" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="23" font-weight="450" fill="#526159">Finite-label classification · nested JSON evidence · real Jev API · median of 3 runs</text>
-<text x="92" y="205" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="25" font-weight="650" fill="#17231d">Median query latency — lower is better (log scale)</text>
-<line x1="390.0" y1="225" x2="390.0" y2="690" stroke="#e5e9e4" stroke-width="2"/>
-<text x="378.0" y="720" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="500" fill="#66736c">0.1s</text>
-<line x1="703.3" y1="225" x2="703.3" y2="690" stroke="#e5e9e4" stroke-width="2"/>
-<text x="691.3333333333333" y="720" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="500" fill="#66736c">1s</text>
-<line x1="1016.7" y1="225" x2="1016.7" y2="690" stroke="#e5e9e4" stroke-width="2"/>
-<text x="1004.6666666666666" y="720" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="500" fill="#66736c">10s</text>
-<line x1="1330.0" y1="225" x2="1330.0" y2="690" stroke="#e5e9e4" stroke-width="2"/>
-<text x="1318.0" y="720" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="500" fill="#66736c">100s</text>
-<text x="92" y="293" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="600" fill="#17231d">batch 1 · concurrency 1</text>
-<text x="92" y="322" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="450" fill="#68766e">100 HTTP requests</text>
-<rect x="390" y="265" width="697.5" height="54" rx="11" fill="#85958c"/>
-<text x="1100" y="300" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="700" fill="#17231d">16.828s</text>
-<text x="1250" y="300" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="650" fill="#0b7151">6 rows/s</text>
-<text x="92" y="385" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="600" fill="#17231d">batch 1 · concurrency 10</text>
-<text x="92" y="414" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="450" fill="#68766e">100 HTTP requests</text>
-<rect x="390" y="357" width="371.8" height="54" rx="11" fill="#4e7968"/>
-<text x="1100" y="392" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="700" fill="#17231d">1.537s</text>
-<text x="1250" y="392" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="650" fill="#0b7151">65 rows/s</text>
-<text x="92" y="477" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="600" fill="#17231d">batch 25 · concurrency 1</text>
-<text x="92" y="506" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="450" fill="#68766e">4 HTTP requests</text>
-<rect x="390" y="449" width="281.8" height="54" rx="11" fill="#36795e"/>
-<text x="1100" y="484" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="700" fill="#17231d">0.793s</text>
-<text x="1250" y="484" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="650" fill="#0b7151">126 rows/s</text>
-<text x="92" y="569" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="600" fill="#17231d">batch 25 · concurrency 10</text>
-<text x="92" y="598" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="450" fill="#68766e">4 HTTP requests</text>
-<rect x="390" y="541" width="101.6" height="54" rx="11" fill="#0b8f62"/>
-<text x="1100" y="576" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="700" fill="#17231d">0.211s</text>
-<text x="1250" y="576" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="650" fill="#0b7151">474 rows/s</text>
-<text x="92" y="661" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="600" fill="#17231d">batch 100 · concurrency 10</text>
-<text x="92" y="690" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="450" fill="#68766e">1 HTTP request</text>
-<rect x="390" y="633" width="162.3" height="54" rx="11" fill="#2d6a56"/>
-<text x="1100" y="668" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="700" fill="#17231d">0.329s</text>
-<text x="1250" y="668" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="650" fill="#0b7151">303 rows/s</text>
-<rect x="92" y="762" width="280" height="70" rx="14" fill="#edf5f0"/>
-<text x="112" y="794" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="27" font-weight="750" fill="#08754f">80×</text>
-<text x="112" y="819" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="500" fill="#53645a">faster than one-at-a-time</text>
-<rect x="410" y="762" width="280" height="70" rx="14" fill="#edf5f0"/>
-<text x="430" y="794" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="27" font-weight="750" fill="#08754f">0.211s</text>
-<text x="430" y="819" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="500" fill="#53645a">100 unique rows</text>
-<rect x="728" y="762" width="280" height="70" rx="14" fill="#edf5f0"/>
-<text x="748" y="794" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="27" font-weight="750" fill="#08754f">0.515s</text>
-<text x="748" y="819" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="500" fill="#53645a">1,000 unique rows</text>
-<rect x="1046" y="762" width="280" height="70" rx="14" fill="#edf5f0"/>
-<text x="1066" y="794" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="27" font-weight="750" fill="#08754f">0.991s</text>
-<text x="1066" y="819" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="500" fill="#53645a">2,049 unique rows</text>
-<text x="92" y="852" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="450" fill="#6a756f">DuckDB 1.5.5 · Jev jev-1.13.0 · macOS arm64 · matrix: 2 transient retries · 1,000-row run: 150/150 HTTP 200</text>
+<rect x="48" y="30" width="1344" height="1085" rx="24" fill="#ffffff" stroke="#dde3dc" stroke-width="2"/>
+<text x="92" y="100" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="42" font-weight="720" fill="#17231d">Jev × DuckDB: live Choice batching performance</text>
+<text x="92" y="146" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="23" font-weight="450" fill="#526159">Finite-label classification · nested JSON evidence · real Jev API · median of 3 runs</text>
+<text x="92" y="198" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="27" font-weight="700" fill="#17231d">100 rows: batching and concurrency</text>
+<text x="92" y="225" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="500" fill="#607068">Median query latency — lower is better (log scale)</text>
+<line x1="390.0" y1="235" x2="390.0" y2="625" stroke="#e5e9e4" stroke-width="2"/>
+<text x="378.0" y="652" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="500" fill="#66736c">0.1s</text>
+<line x1="703.3" y1="235" x2="703.3" y2="625" stroke="#e5e9e4" stroke-width="2"/>
+<text x="691.3333333333333" y="652" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="500" fill="#66736c">1s</text>
+<line x1="1016.7" y1="235" x2="1016.7" y2="625" stroke="#e5e9e4" stroke-width="2"/>
+<text x="1004.6666666666666" y="652" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="500" fill="#66736c">10s</text>
+<line x1="1330.0" y1="235" x2="1330.0" y2="625" stroke="#e5e9e4" stroke-width="2"/>
+<text x="1318.0" y="652" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="500" fill="#66736c">100s</text>
+<text x="92" y="270" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="600" fill="#17231d">batch 1 · concurrency 1</text>
+<text x="92" y="293" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="450" fill="#68766e">100 HTTP requests</text>
+<rect x="390" y="245" width="697.5" height="48" rx="10" fill="#85958c"/>
+<text x="1100" y="276" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="700" fill="#17231d">16.828s</text>
+<text x="1250" y="276" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="20" font-weight="650" fill="#0b7151">6 rows/s</text>
+<text x="92" y="346" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="600" fill="#17231d">batch 1 · concurrency 10</text>
+<text x="92" y="369" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="450" fill="#68766e">100 HTTP requests</text>
+<rect x="390" y="321" width="371.8" height="48" rx="10" fill="#4e7968"/>
+<text x="1100" y="352" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="700" fill="#17231d">1.537s</text>
+<text x="1250" y="352" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="20" font-weight="650" fill="#0b7151">65 rows/s</text>
+<text x="92" y="422" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="600" fill="#17231d">batch 25 · concurrency 1</text>
+<text x="92" y="445" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="450" fill="#68766e">4 HTTP requests</text>
+<rect x="390" y="397" width="281.8" height="48" rx="10" fill="#36795e"/>
+<text x="1100" y="428" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="700" fill="#17231d">0.793s</text>
+<text x="1250" y="428" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="20" font-weight="650" fill="#0b7151">126 rows/s</text>
+<text x="92" y="498" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="600" fill="#17231d">batch 25 · concurrency 10</text>
+<text x="92" y="521" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="450" fill="#68766e">4 HTTP requests</text>
+<rect x="390" y="473" width="101.6" height="48" rx="10" fill="#0b8f62"/>
+<text x="1100" y="504" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="700" fill="#17231d">0.211s</text>
+<text x="1250" y="504" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="20" font-weight="650" fill="#0b7151">474 rows/s</text>
+<text x="92" y="574" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="600" fill="#17231d">batch 100 · concurrency 10</text>
+<text x="92" y="597" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="450" fill="#68766e">1 HTTP request</text>
+<rect x="390" y="549" width="162.3" height="48" rx="10" fill="#2d6a56"/>
+<text x="1100" y="580" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="700" fill="#17231d">0.329s</text>
+<text x="1250" y="580" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="20" font-weight="650" fill="#0b7151">303 rows/s</text>
+<text x="92" y="725" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="27" font-weight="700" fill="#17231d">100 vs 1,000 rows: batch-size comparison</text>
+<text x="92" y="754" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="18" font-weight="500" fill="#607068">Concurrency 10 · median end-to-end query latency</text>
+<rect x="985" y="709" width="20" height="20" rx="4" fill="#0b8f62"/>
+<text x="1015" y="726" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="550" fill="#17231d">100 rows</text>
+<rect x="1135" y="709" width="20" height="20" rx="4" fill="#8abda7"/>
+<text x="1165" y="726" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="550" fill="#17231d">1,000 rows</text>
+<line x1="180" y1="1015.0" x2="1320" y2="1015.0" stroke="#e5e9e4" stroke-width="2"/>
+<text x="115" y="1021.0" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="500" fill="#66736c">0s</text>
+<line x1="180" y1="958.8" x2="1320" y2="958.8" stroke="#e5e9e4" stroke-width="2"/>
+<text x="115" y="964.75" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="500" fill="#66736c">0.25s</text>
+<line x1="180" y1="902.5" x2="1320" y2="902.5" stroke="#e5e9e4" stroke-width="2"/>
+<text x="115" y="908.5" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="500" fill="#66736c">0.5s</text>
+<line x1="180" y1="846.2" x2="1320" y2="846.2" stroke="#e5e9e4" stroke-width="2"/>
+<text x="115" y="852.25" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="500" fill="#66736c">0.75s</text>
+<line x1="180" y1="790.0" x2="1320" y2="790.0" stroke="#e5e9e4" stroke-width="2"/>
+<text x="115" y="796.0" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="500" fill="#66736c">1s</text>
+<rect x="395" y="967.5" width="90" height="47.5" rx="9" fill="#0b8f62"/>
+<text x="403" y="957.536531270016" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="700" fill="#17231d">0.211s</text>
+<rect x="515" y="798.0" width="90" height="217.0" rx="9" fill="#8abda7"/>
+<text x="523" y="787.9945218341891" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="700" fill="#17231d">0.964s</text>
+<text x="443" y="1052" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="650" fill="#17231d">batch 25</text>
+<rect x="855" y="940.9" width="90" height="74.1" rx="9" fill="#0b8f62"/>
+<text x="863" y="930.862621696433" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="700" fill="#17231d">0.329s</text>
+<rect x="975" y="899.2" width="90" height="115.8" rx="9" fill="#8abda7"/>
+<text x="983" y="889.171940619126" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="700" fill="#17231d">0.515s</text>
+<text x="903" y="1052" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="22" font-weight="650" fill="#17231d">batch 100</text>
+<text x="92" y="1095" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="450" fill="#6a756f">DuckDB 1.5.5 · Jev jev-1.13.0 · macOS arm64 · matrix: 2 transient retries · 1,000-row run: 150/150 HTTP 200</text>
 </svg>
