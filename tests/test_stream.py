@@ -83,7 +83,10 @@ def test_limit_stops_and_next_query_works(db: duckdb.DuckDBPyConnection, stub: S
     rows = db.execute(stream_sql(100000) + " LIMIT 1").fetchall()
     assert len(rows) == 1
     sent = sum(len(c["body"]["questions"]) for c in stub.calls)
-    assert sent <= 8192
+    # DuckDB 1.4 can request one additional 2,048-row input vector before the
+    # downstream LIMIT cancellation reaches this in/out operator. Work must
+    # still stay within five vectors instead of consuming the 100,000-row input.
+    assert sent <= 10240
     before = len(stub.calls)
     assert len(db.execute(stream_sql(1)).fetchall()) == 1
     assert len(stub.calls) == before + 1
