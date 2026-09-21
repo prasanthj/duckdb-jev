@@ -23,7 +23,19 @@ High-throughput, robust native C++ DuckDB extension for semantic predicates, cla
 
 ![Live Jev Choice performance: batching matrix for 100 rows and scaling results through 2,049 rows](docs/images/live-performance.svg)
 
-Fresh real-API Choice-classification runs on macOS arm64 with DuckDB 1.5.5 and `jev-1.13.0`. For 100 unique nested JSON rows, `jev_stream` at batch 25/concurrency 10 completed in a **0.211s median**, compared with **16.828s** one row at a time. At batch 100/concurrency 10, **1,000 rows completed in a 0.515s median** and 2,049 rows completed in **0.991s**. Times include SQL execution, fetch, ordering, and the instrumentation relay. The fixed 12-template corpus is useful for throughput and regression testing, not a production accuracy estimate. Two transient upstream responses in the 100-row matrix were retried successfully; all 150 responses in the 1,000-row run were HTTP 200. See the [method and full results](docs/live-results.md).
+These are live `jev_stream` **Choice** classifications against the real TypeSafe API and `jev-1.13.0`, not a simulated service. Each unique nested JSON row is assigned one of four routing labels. Runs used DuckDB 1.5.5 on macOS arm64.
+
+| Rows | Batch | Concurrency | Requests/query | Median query time | Median throughput |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 1 | 1 | 100 | 16.828s | 6 rows/s |
+| 100 | 25 | 10 | 4 | **0.211s** | **474 rows/s** |
+| 100 | 100 | 10 | 1 | 0.329s | 303 rows/s |
+| 1,000 | 25 | 10 | 40 | 0.964s | 1,037 rows/s |
+| 1,000 | 100 | 10 | 10 | **0.515s** | **1,943 rows/s** |
+
+For 100 rows, batch 25 is fastest because its four requests overlap. For 1,000 rows, batch 100 produces exactly ten requests and fills the configured ten-way concurrency in one wave. A separate 2,049-row scale check at batch 100/concurrency 10 completed in 0.991s.
+
+The 100- and 1,000-row figures are medians of three complete queries and include DuckDB execution, fetch, ordering, relay instrumentation, network time, and Jev inference. The fixed 12-template corpus tests throughput and regression behavior; matching its expected labels is not a general accuracy claim. Two transient responses in the 100-row one-at-a-time matrix were retried successfully. All 150 responses in the 1,000-row run were HTTP 200. See the [method, complete matrix, request percentiles, and raw-artifact locations](docs/live-results.md).
 
 ![Animated terminal walkthrough: nested account evidence, renewal-risk classification with confidence, and cached query reuse](docs/images/terminal-demo.gif)
 
