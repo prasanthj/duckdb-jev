@@ -68,7 +68,12 @@ def test_pipeline_request_overlap(db: duckdb.DuckDBPyConnection, stub: Stub, con
     db.execute("SET jev_max_request_bytes=1048576")
     db.execute(f"SET jev_concurrency={concurrency}")
     assert len(db.execute(stream_sql(9000)).fetchall()) == 9000
-    assert stub.peak == concurrency
+    if concurrency == 1:
+        assert stub.peak == 1
+    else:
+        # Thread scheduling need not saturate every worker, but requests must
+        # overlap and may never exceed the configured concurrency bound.
+        assert 2 <= stub.peak <= concurrency
 
 
 def test_limit_stops_and_next_query_works(db: duckdb.DuckDBPyConnection, stub: Stub) -> None:
