@@ -2,6 +2,7 @@
 
 [![Native build and tests](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml/badge.svg)](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml)
 [![Native CI](https://github.com/prasanthj/duckdb-jev/actions/workflows/ci.yml/badge.svg)](https://github.com/prasanthj/duckdb-jev/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/prasanthj/duckdb-jev?display_name=tag&sort=semver)](https://github.com/prasanthj/duckdb-jev/releases/latest)
 [![DuckDB 1.4.5 and 1.5.5](https://img.shields.io/badge/DuckDB-1.4.5%20%7C%201.5.5-fff000?logo=duckdb&logoColor=black)](https://duckdb.org/docs/stable/extensions/extension_distribution)
 [![Targets: macOS and Linux, x86-64 and ARM64](https://img.shields.io/badge/targets-macOS%20%7C%20Linux%20%C2%B7%20x86--64%20%7C%20ARM64-blue)](docs/distribution.md)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
