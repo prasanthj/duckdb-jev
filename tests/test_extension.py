@@ -185,8 +185,14 @@ def test_timeout_stops_queued_work(db: duckdb.DuckDBPyConnection, stub: Stub) ->
     stub.delay = 0.15
     with pytest.raises(duckdb.Error, match="transport failed"):
         db.execute("SELECT jev_noul({'i':i},'p') FROM range(200) t(i)").fetchall()
-    time.sleep(0.25)
-    assert len(stub.calls) == 1 and stub.active == 0
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        with stub.lock:
+            if stub.active == 0:
+                break
+        time.sleep(0.01)
+    with stub.lock:
+        assert len(stub.calls) == 1 and stub.active == 0
     stub.delay = 0
     db.execute("SET jev_timeout_ms=30000")
     assert db.execute("SELECT (jev_noul({'i':9},'p')).noul").fetchone() == (0.9,)
