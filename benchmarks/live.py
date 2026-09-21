@@ -1,6 +1,7 @@
 """Bounded real Jev evaluation through an instrumented loopback forwarding relay.
 
-No fabricated responses. No retries. Reads TYPESAFE_API_KEY only.
+No fabricated responses. The relay does not retry; extension retry behavior remains active and is measured. Reads
+TYPESAFE_API_KEY only.
 """
 
 import argparse
@@ -244,7 +245,10 @@ def main() -> None:
         "platform": platform.platform(),
         "settings": vars(args),
         "corpus_sha256": hashlib.sha256(json.dumps(fixture).encode()).hexdigest(),
-        "notes": "Synthetic templated corpus, not a production accuracy estimate. No retries. TLS connections reused by relay.",
+        "notes": (
+            "Synthetic templated corpus, not a production accuracy estimate. The relay does not retry; extension retries "
+            "are included. TLS connections reused by relay."
+        ),
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"Results: {output}", flush=True)
@@ -398,7 +402,10 @@ def main() -> None:
             "",
             json.dumps(summary),
             "",
-            "Real upstream through loopback relay; synthetic templated data. No retries. Three trials are not enough for stable query p95.",
+            (
+                "Real upstream through loopback relay; synthetic templated data. Relay does not retry; extension retries "
+                "are included. Three trials are not enough for stable query p95."
+            ),
             "",
             "| Path | Batch | Concurrency | Median query s | Requests/query | Accuracy range |",
             "|---|---:|---:|---:|---|---|",

@@ -19,6 +19,12 @@ High-throughput, robust native C++ DuckDB extension for semantic predicates, cla
 - **Observable:** `jev_stats()` reports requests, questions, retries, failures, cache hits, tokens, bytes and transport latency.
 - **Verifiable releases:** native macOS/Linux builds for x86-64 and ARM64, SHA-256 checksums, SPDX SBOMs and GitHub build provenance.
 
+## Live performance
+
+![Live Jev batching performance: median latency for 100 nested JSON rows across batch and concurrency settings](docs/images/live-performance.svg)
+
+Fresh real-API run on macOS arm64 with DuckDB 1.5.5 and `jev-1.13.0`. For 100 unique nested JSON rows, `jev_stream` at batch 25/concurrency 10 completed in a **0.211s median**, compared with **16.828s** one row at a time. A separate 2,049-unique-row run completed in **0.991s**. Times include SQL execution, fetch, ordering, and the instrumentation relay. The fixed 12-template corpus is useful for throughput and regression testing, not a production accuracy estimate. Two transient upstream responses were retried successfully. See the [method and full results](docs/live-results.md).
+
 ![Animated terminal walkthrough: nested account evidence, renewal-risk classification with confidence, and cached query reuse](docs/images/terminal-demo.gif)
 
 *Real Jev responses on synthetic data; timings are from one local run. Reproduce the animation with `vhs examples/terminal_demo.tape`.*
@@ -216,6 +222,7 @@ For measured live runs (billable and explicitly bounded):
 ```sh
 uv run python -m benchmarks.live --live
 uv run python -m benchmarks.live_cache --live
+uv run python -m benchmarks.plot_live benchmarks/results/<live-run> docs/images/live-performance.svg
 ```
 
 The first run caps itself at 1500 HTTP requests / 12000 questions by default. It saves inputs, outputs, per-request timing/usage, per-query results and summaries. The second caps at 40 requests / 800 questions and compares first runs, cached repeats, and offline Parquet reuse. Both read `TYPESAFE_API_KEY` only. Timing includes the loopback instrumentation relay; it is not a pure provider-internal latency measure.

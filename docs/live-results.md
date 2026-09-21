@@ -1,11 +1,13 @@
 # Real Jev evaluation and cache results
 
-Native DuckDB v1.5.5 on macOS arm64; returned model `jev-1.13.0`. Main benchmark run on 2026-09-18 UTC, with batch-equivalence verification repeated on 2026-09-20. All inference requests used the real TypeSafe endpoint, and no retries were observed. Test data: nested synthetic support tickets from 12 templates. These are functional/throughput measurements, not production accuracy estimates.
+Native DuckDB v1.5.5 on macOS arm64; returned model `jev-1.13.0`. Main benchmark run on 2026-09-21 UTC, with batch-equivalence verification repeated on 2026-09-20. All inference requests used the real TypeSafe endpoint. Test data: nested synthetic support tickets from 12 templates. These are functional/throughput measurements, not production accuracy estimates.
+
+![Live Jev batching performance](images/live-performance.svg)
 
 ## Validation
 
 - Full deterministic regression suite: **109 passed, 3 skipped**. Three opt-in live API tests also passed. Fault injection, concurrency accounting and deterministic edge cases use the local stub.
-- Main live suite: **39 queries completed**, **1,325 requests**, **7,748 judgments**; every HTTP response 200.
+- Main live suite: **39 queries completed**, **1,327 requests**, **7,750 judgments**; 1,325 responses were HTTP 200. Two transient 502 responses during one one-row trial were retried successfully by the extension.
 - All main-suite outputs matched the fixture's routing/refund expectations or score tolerance (±0.75 rubric index). Repeated templates limit this result's generality.
 - Cache suite: **36 additional requests**, **774 judgments**; validated 129 rows across six first-run/cached-repeat pairs. Every warm query had 129 cache hits and zero requests.
 - Independent review: 52 cache/query/stream tests passed; no blocking findings remain.
@@ -20,20 +22,20 @@ Three repetitions per configuration. SQL execution/fetch/order and relay overhea
 
 | Path | Batch | Concurrency | HTTP requests | Median query time |
 |---|---:|---:|---:|---:|
-| Scalar Choice | 1 | 1 | 100 | 15.304s |
-| Scalar Choice | 1 | 10 | 100 | 1.818s |
-| Scalar Choice | 25 | 1 | 4 | 0.713s |
-| Scalar Choice | 25 | 10 | 4 | 0.436s |
-| Scalar Choice | 100 | 10 | 1 | 0.322s |
-| Stream | 1 | 1 | 100 | 14.794s |
-| Stream | 1 | 10 | 100 | 2.025s |
-| Stream | 25 | 1 | 4 | 0.598s |
-| Stream | 25 | 10 | 4 | 0.175s |
-| Stream | 100 | 10 | 1 | 0.309s |
+| Scalar Choice | 1 | 1 | 100 | 15.176s |
+| Scalar Choice | 1 | 10 | 100 | 1.635s |
+| Scalar Choice | 25 | 1 | 4 | 0.797s |
+| Scalar Choice | 25 | 10 | 4 | 0.244s |
+| Scalar Choice | 100 | 10 | 1 | 0.329s |
+| Stream | 1 | 1 | 100–102 | 16.828s |
+| Stream | 1 | 10 | 100 | 1.537s |
+| Stream | 25 | 1 | 4 | 0.793s |
+| Stream | 25 | 10 | 4 | 0.211s |
+| Stream | 100 | 10 | 1 | 0.329s |
 
-Per-HTTP-request p50/p95 over the main run: 137ms / 330ms. These combine different batch sizes and include network transport; not model compute time. Three trials do not establish a robust query p95.
+Per-HTTP-request p50/p95 over the main run: 147ms / 281ms. These combine different batch sizes and include network transport; not model compute time. Three trials do not establish a robust query p95.
 
-For 2,049 unique rows at batch 100/concurrency 10: scalar 1.827s, stream 0.997s; both made 21 requests in this input-table scan. For 4,097 rows containing 10 unique inputs: one request and 4,087 reused rows on each path. Scalar with query cache disabled made 3 requests (chunk dedup remains enabled).
+For 2,049 unique rows at batch 100/concurrency 10: scalar 1.328s, stream 0.991s; both made 21 requests in this input-table scan. For 4,097 rows containing 10 unique inputs: one request and 4,087 reused rows on each path. Scalar with query cache disabled made 3 requests (chunk dedup remains enabled).
 
 ## Repeated-query cache: 129 rows
 
@@ -48,9 +50,9 @@ Offline Parquet reuse: **129/129 rows**, **8.11ms**, zero HTTP requests, new Duc
 
 ## Usage and artifacts
 
-Instrumented main+cache runs: **1,361 requests /8,522 judgments**. Provider-reported token totals: `{"input_tokens": 2488916, "output_tokens": 362697}`. The two separate smoke requests are excluded from those usage totals. Dollar cost is not inferred from token totals without verified billing rates.
+The fresh main run used **1,327 requests /7,750 judgments**. Provider-reported token totals: `{"input_tokens": 2284256, "output_tokens": 328857}`. Cache results below come from the separate 2026-09-18 run. Dollar cost is not inferred from token totals without verified billing rates.
 
-- Main raw inputs/outputs, request ledger, timings and binary fingerprint: `benchmarks/results/live-20260918T061555790832Z`.
+- Main raw inputs/outputs, request ledger, timings and binary fingerprint: `benchmarks/results/live-20260921T030147262719Z`.
 - Cache trials, request ledger, summary and reusable `enriched.parquet`: `benchmarks/results/live-cache-20260918T062635911271Z`.
 
 Raw generated artifacts are local and git-ignored. This report and runnable harnesses are tracked. All runs terminate; no paid feed or background inference service remains.
