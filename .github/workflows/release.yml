@@ -91,6 +91,7 @@ jobs:
           path: |
             build
             vendor/duckdb
+            vendor/duckdb-static
           key: native-v3-unity-cxx17-nojemalloc-${{ matrix.platform }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('build.sh', 'CMakeLists.txt', 'extension_config.cmake', 'uv.lock') }}
       - name: Build Linux
         if: runner.os == 'Linux'

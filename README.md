@@ -38,9 +38,9 @@ uv run pyright tests benchmarks scripts examples
 uv run ruff check tests benchmarks scripts examples
 ```
 
-The build uses DuckDB's unity compilation and disables jemalloc in the statically linked extension core. This does not change the host DuckDB runtime's allocator.
+The extension links DuckDB's official pinned platform static library into the loadable binary. This keeps it compatible with Python and other hosts that do not export DuckDB symbols globally, without recompiling DuckDB core.
 
-The first build downloads pinned DuckDB v1.5.5 sources and builds the required core static library; subsequent builds are incremental. The vendored nlohmann JSON header is v3.12.0 and retains its upstream MIT license notice. No daemon is left running by the tests or benchmarks.
+The first build downloads pinned DuckDB v1.5.5 headers and the matching official static-library archive, verifies both the source commit and archive SHA-256, then compiles only the extension and a small platform probe. Subsequent builds are incremental. The vendored nlohmann JSON header is v3.12.0 and retains its upstream MIT license notice. No daemon is left running by the tests or benchmarks.
 
 ## License
 
