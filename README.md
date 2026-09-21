@@ -254,3 +254,10 @@ This is a native extension distributed through GitHub Releases, not yet a signed
 
 
 The current artifact targets native DuckDB, not DuckDB-Wasm. A Wasm port requires a matching Wasm extension build plus browser-compatible transport, scheduling, and credentials. See [DuckDB-Wasm extension documentation](https://duckdb.org/docs/current/clients/wasm/extensions).
+
+## Related work
+
+- [colliber/duckdb-jev](https://github.com/colliber/duckdb-jev) is a native DuckDB extension with a compact SQL interface and bind-time `ENUM` and `STRUCT` result types. See its [Hacker News discussion](https://news.ycombinator.com/item?id=49774406).
+- [Query-farm/vgi-typesafe](https://github.com/Query-farm/vgi-typesafe) exposes Jev as VGI workers and lateral-joinable DuckDB table functions over Arrow subprocesses. It was demonstrated in [A SQL Where Clause for Taste](https://news.ycombinator.com/item?id=49755853).
+
+This project is a separate native implementation focused on cross-row request batching, streaming across DuckDB chunks, bounded execution, configurable caching, and packaged multi-platform releases.
