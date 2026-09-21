@@ -8,6 +8,10 @@
 
 High-throughput, robust native C++ DuckDB extension for semantic predicates, classification and rubric scoring through TypeSafe/Jev. It batches and streams inference directly from SQL without Python UDF registration or a separate inference server.
 
+![Animated terminal walkthrough: nested account evidence, renewal-risk classification with confidence, and cached query reuse](docs/images/terminal-demo.gif)
+
+*Real Jev responses on synthetic data; timings are from one local run. Reproduce the animation with `vhs examples/terminal_demo.tape`.*
+
 ## Features
 
 - **SQL-native judgments:** Noul predicates, finite Choice classification, ordered Score rubrics and mixed multi-question evaluation.
@@ -36,10 +40,6 @@ These are live `jev_stream` **Choice** classifications against the real TypeSafe
 For 100 rows, batch 25 is fastest because its four requests overlap. For 1,000 rows, batch 100 produces exactly ten requests and fills the configured ten-way concurrency in one wave. A separate 2,049-row scale check at batch 100/concurrency 10 completed in 0.991s.
 
 The 100- and 1,000-row figures are medians of three complete queries and include DuckDB execution, fetch, ordering, relay instrumentation, network time, and Jev inference. The fixed 12-template corpus tests throughput and regression behavior; matching its expected labels is not a general accuracy claim. Two transient responses in the 100-row one-at-a-time matrix were retried successfully. All 150 responses in the 1,000-row run were HTTP 200. See the [method, complete matrix, request percentiles, and raw-artifact locations](docs/live-results.md).
-
-![Animated terminal walkthrough: nested account evidence, renewal-risk classification with confidence, and cached query reuse](docs/images/terminal-demo.gif)
-
-*Real Jev responses on synthetic data; timings are from one local run. Reproduce the animation with `vhs examples/terminal_demo.tape`.*
 
 Implemented and tested with DuckDB **1.4.5** and **1.5.5**. The built artifact is `build/extension/jev/jev.duckdb_extension`. Native C++ extensions must match DuckDB's version and platform; each version/platform combination needs its own build and verification.
 
