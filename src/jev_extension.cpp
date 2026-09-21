@@ -215,7 +215,7 @@ static unique_ptr<BaseSecret> CreateJevSecret(ClientContext &,
   CopySecretOption("endpoint", input, *secret);
   CopySecretOption("model", input, *secret);
   secret->redact_keys.insert("api_key");
-  return secret;
+  return std::move(secret);
 }
 static void RegisterJevSecret(ExtensionLoader &loader) {
   SecretType type;
