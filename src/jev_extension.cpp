@@ -33,6 +33,11 @@
 
 namespace duckdb {
 using Json = nlohmann::json;
+static LogicalType VarcharType() { return LogicalType(LogicalTypeId::VARCHAR); }
+static LogicalType DoubleType() { return LogicalType(LogicalTypeId::DOUBLE); }
+static LogicalType BooleanType() { return LogicalType(LogicalTypeId::BOOLEAN); }
+static LogicalType BigintType() { return LogicalType(LogicalTypeId::BIGINT); }
+static LogicalType AnyType() { return LogicalType(LogicalTypeId::ANY); }
 // A process-wide ceiling prevents DuckDB workers/connections multiplying HTTP
 // concurrency.
 static std::mutex gate_mutex;
@@ -131,7 +136,7 @@ static Json Evidence(const Value &v) {
   return nullptr;
 }
 static Json Document(const Value &v) {
-  if (v.type() == LogicalType::VARCHAR)
+  if (v.type() == VarcharType())
     return Parse(v.GetValue<string>());
   return Evidence(v);
 }
@@ -224,9 +229,9 @@ static void RegisterJevSecret(ExtensionLoader &loader) {
   type.default_provider = "config";
   loader.RegisterSecretType(type);
   CreateSecretFunction function{"jev", "config", CreateJevSecret};
-  function.named_parameters["api_key"] = LogicalType::VARCHAR;
-  function.named_parameters["endpoint"] = LogicalType::VARCHAR;
-  function.named_parameters["model"] = LogicalType::VARCHAR;
+  function.named_parameters["api_key"] = VarcharType();
+  function.named_parameters["endpoint"] = VarcharType();
+  function.named_parameters["model"] = VarcharType();
   loader.RegisterFunction(function);
 }
 static JevSecretOptions Secret(ClientContext &ctx) {
@@ -874,7 +879,7 @@ static Value Probabilities(const Json &j) {
     keys.emplace_back(p.key());
     values.emplace_back(p.value().get<double>());
   }
-  return Value::MAP(LogicalType::VARCHAR, LogicalType::DOUBLE, std::move(keys),
+  return Value::MAP(VarcharType(), DoubleType(), std::move(keys),
                     std::move(values));
 }
 static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -1143,24 +1148,23 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
 }
 static LogicalType ReturnType(const string &name) {
   if (name == "jev")
-    return LogicalType::BOOLEAN;
+    return BooleanType();
   child_list_t<LogicalType> fields;
   if (name == "jev_eval")
     fields.emplace_back("answers", LogicalType::JSON());
   else if (name == "jev_noul")
-    fields.emplace_back("noul", LogicalType::DOUBLE);
+    fields.emplace_back("noul", DoubleType());
   else {
     fields.emplace_back(name == "jev_choice" ? "choice" : "score",
-                        name == "jev_choice" ? LogicalType::VARCHAR
-                                             : LogicalType::DOUBLE);
-    fields.emplace_back("confidence", LogicalType::DOUBLE);
-    fields.emplace_back("probabilities", LogicalType::MAP(LogicalType::VARCHAR,
-                                                          LogicalType::DOUBLE));
+                        name == "jev_choice" ? VarcharType() : DoubleType());
+    fields.emplace_back("confidence", DoubleType());
+    fields.emplace_back("probabilities",
+                        LogicalType::MAP(VarcharType(), DoubleType()));
     if (name == "jev_score")
       fields.emplace_back("legend", LogicalType::JSON());
   }
-  fields.emplace_back("model", LogicalType::VARCHAR);
-  fields.emplace_back("cache_hit", LogicalType::BOOLEAN);
+  fields.emplace_back("model", VarcharType());
+  fields.emplace_back("cache_hit", BooleanType());
   return LogicalType::STRUCT(fields);
 }
 #include "jev_stream.hpp"
@@ -1177,8 +1181,8 @@ static unique_ptr<FunctionData> StatsBind(ClientContext &,
            "output_tokens",    "request_bytes", "response_bytes",
            "total_latency_ms", "max_latency_ms"};
   types.assign(9, LogicalType::UBIGINT);
-  types.push_back(LogicalType::DOUBLE);
-  types.push_back(LogicalType::DOUBLE);
+  types.push_back(DoubleType());
+  types.push_back(DoubleType());
   return nullptr;
 }
 static unique_ptr<GlobalTableFunctionState>
@@ -1215,7 +1219,7 @@ static void Load(ExtensionLoader &loader) {
   RegisterStream(loader);
   RegisterStats(loader);
   ScalarFunction clear(
-      "jev_cache_clear", {}, LogicalType::BOOLEAN,
+      "jev_cache_clear", {}, BooleanType(),
       [](DataChunk &args, ExpressionState &state, Vector &result) {
         auto cached = state.GetContext().registered_state->Get<QueryState>(
             "jev_query_state");
@@ -1229,46 +1233,46 @@ static void Load(ExtensionLoader &loader) {
   auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
   config.AddExtensionOption("jev_session_cache_bytes",
                             "Opt-in connection LRU serialized byte budget",
-                            LogicalType::BIGINT, Value::BIGINT(0));
+                            BigintType(), Value::BIGINT(0));
   config.AddExtensionOption("jev_session_cache_ttl_ms",
-                            "Connection cache non-sliding TTL",
-                            LogicalType::BIGINT, Value::BIGINT(60000));
-  config.AddExtensionOption(
-      "jev_cache_bytes", "Query cache serialized byte budget (0 disables)",
-      LogicalType::BIGINT, Value::BIGINT(8 * 1024 * 1024));
-  config.AddExtensionOption("jev_model", "TypeSafe model", LogicalType::VARCHAR,
+                            "Connection cache non-sliding TTL", BigintType(),
+                            Value::BIGINT(60000));
+  config.AddExtensionOption("jev_cache_bytes",
+                            "Query cache serialized byte budget (0 disables)",
+                            BigintType(), Value::BIGINT(8 * 1024 * 1024));
+  config.AddExtensionOption("jev_model", "TypeSafe model", VarcharType(),
                             Value("jev-latest"));
   config.AddExtensionOption("jev_endpoint", "Trusted TypeSafe endpoint",
-                            LogicalType::VARCHAR,
+                            VarcharType(),
                             Value("https://api.typesafe.ai/v1/systemone"));
   config.AddExtensionOption("jev_batch_size",
-                            "Maximum questions per HTTP request",
-                            LogicalType::BIGINT, Value::BIGINT(25));
+                            "Maximum questions per HTTP request", BigintType(),
+                            Value::BIGINT(25));
   config.AddExtensionOption("jev_max_request_bytes",
-                            "Serialized request byte cap", LogicalType::BIGINT,
+                            "Serialized request byte cap", BigintType(),
                             Value::BIGINT(65536));
   config.AddExtensionOption("jev_concurrency",
                             "Concurrent requests (global ceiling 10)",
-                            LogicalType::BIGINT, Value::BIGINT(10));
+                            BigintType(), Value::BIGINT(10));
   config.AddExtensionOption("jev_timeout_ms", "HTTP timeout per attempt",
-                            LogicalType::BIGINT, Value::BIGINT(30000));
+                            BigintType(), Value::BIGINT(30000));
   config.AddExtensionOption(
       "jev_max_retries", "Retries for transient transport, 429 and 5xx errors",
-      LogicalType::BIGINT, Value::BIGINT(2));
+      BigintType(), Value::BIGINT(2));
   config.AddExtensionOption("jev_retry_base_ms",
-                            "Initial exponential retry delay",
-                            LogicalType::BIGINT, Value::BIGINT(100));
+                            "Initial exponential retry delay", BigintType(),
+                            Value::BIGINT(100));
   config.AddExtensionOption("jev_retry_max_delay_ms",
                             "Maximum retry delay including Retry-After",
-                            LogicalType::BIGINT, Value::BIGINT(5000));
+                            BigintType(), Value::BIGINT(5000));
   config.AddExtensionOption(
       "jev_max_questions_per_query",
-      "Maximum billable questions dispatched by one query", LogicalType::BIGINT,
+      "Maximum billable questions dispatched by one query", BigintType(),
       Value::BIGINT(100000));
   config.AddExtensionOption(
       "jev_max_requests_per_query",
-      "Maximum logical HTTP requests dispatched by one query",
-      LogicalType::BIGINT, Value::BIGINT(2000));
+      "Maximum logical HTTP requests dispatched by one query", BigintType(),
+      Value::BIGINT(2000));
   for (string name :
        {"jev", "jev_noul", "jev_choice", "jev_score", "jev_eval"}) {
     ScalarFunctionSet set(name);
@@ -1277,9 +1281,9 @@ static void Load(ExtensionLoader &loader) {
         continue;
       if (argc == 3 && name == "jev_eval")
         continue;
-      vector<LogicalType> args(argc, LogicalType::ANY);
+      vector<LogicalType> args(argc, AnyType());
       if (name == "jev")
-        args[2] = LogicalType::DOUBLE;
+        args[2] = DoubleType();
       ScalarFunction fn(name, args, ReturnType(name), Evaluate);
       fn.stability = FunctionStability::VOLATILE;
       fn.null_handling = FunctionNullHandling::SPECIAL_HANDLING;

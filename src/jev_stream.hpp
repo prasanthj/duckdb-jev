@@ -235,8 +235,8 @@ struct StreamState : LocalTableFunctionState {
       output.SetValue(0, count, row->id);
       if (row->null) {
         output.SetValue(1, count, Value(LogicalType::JSON()));
-        output.SetValue(2, count, Value(LogicalType::VARCHAR));
-        output.SetValue(3, count, Value(LogicalType::BOOLEAN));
+        output.SetValue(2, count, Value(VarcharType()));
+        output.SetValue(3, count, Value(BooleanType()));
       } else {
         while (row->flight->future.wait_for(std::chrono::milliseconds(20)) !=
                std::future_status::ready)
@@ -266,8 +266,8 @@ static unique_ptr<FunctionData> StreamBind(ClientContext &,
   if (input.input_table_types.size() != 3)
     throw BinderException(
         "jev_stream expects TABLE columns (row_id, evidence, questions)");
-  types = {input.input_table_types[0], LogicalType::JSON(),
-           LogicalType::VARCHAR, LogicalType::BOOLEAN};
+  types = {input.input_table_types[0], LogicalType::JSON(), VarcharType(),
+           BooleanType()};
   names = {"row_id", "answers", "model", "cache_hit"};
   return make_uniq<TableFunctionData>();
 }
