@@ -38,6 +38,13 @@ static LogicalType DoubleType() { return LogicalType(LogicalTypeId::DOUBLE); }
 static LogicalType BooleanType() { return LogicalType(LogicalTypeId::BOOLEAN); }
 static LogicalType BigintType() { return LogicalType(LogicalTypeId::BIGINT); }
 static LogicalType AnyType() { return LogicalType(LogicalTypeId::ANY); }
+static bool ContextInterrupted(ClientContext &ctx) {
+#ifdef JEV_DUCKDB_1_4
+  return ctx.interrupted.load();
+#else
+  return ctx.IsInterrupted();
+#endif
+}
 // A process-wide ceiling prevents DuckDB workers/connections multiplying HTTP
 // concurrency.
 static std::mutex gate_mutex;
@@ -511,7 +518,7 @@ static Json AwaitFlight(const std::shared_ptr<Flight> &flight,
                         ClientContext &ctx) {
   while (flight->future.wait_for(std::chrono::milliseconds(20)) !=
          std::future_status::ready)
-    if (ctx.IsInterrupted())
+    if (ContextInterrupted(ctx))
       Fail("query cancelled");
   return Json::parse(*flight->future.get());
 }
@@ -567,7 +574,7 @@ static size_t Header(char *data, size_t size, size_t nmemb, void *ptr) {
 }
 static int Progress(void *ptr, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
   auto &t = *static_cast<Transfer *>(ptr);
-  return t.context->IsInterrupted() || t.stopped->load();
+  return ContextInterrupted(*t.context) || t.stopped->load();
 }
 struct Gate {
   bool held = false;
@@ -576,11 +583,11 @@ struct Gate {
       : context(&ctx) {
     std::unique_lock<std::mutex> lock(gate_mutex);
     while (active_calls >= GLOBAL_LIMIT || query_calls[&ctx] >= limit) {
-      if (ctx.IsInterrupted() || stop.load())
+      if (ContextInterrupted(ctx) || stop.load())
         Fail("query cancelled");
       gate_cv.wait_for(lock, std::chrono::milliseconds(20));
     }
-    if (ctx.IsInterrupted() || stop.load())
+    if (ContextInterrupted(ctx) || stop.load())
       Fail("query cancelled");
     active_calls++;
     query_calls[&ctx]++;
@@ -609,7 +616,7 @@ static void RetryWait(ClientContext &ctx, std::atomic<bool> &stop,
   auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(delay_ms);
   while (std::chrono::steady_clock::now() < deadline) {
-    if (ctx.IsInterrupted() || stop.load())
+    if (ContextInterrupted(ctx) || stop.load())
       Fail("query cancelled");
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
@@ -787,7 +794,7 @@ public:
     auto future = task->get_future();
     std::unique_lock<std::mutex> lock(mutex);
     while (tasks.size() >= 128) {
-      if (ctx.IsInterrupted())
+      if (ContextInterrupted(ctx))
         Fail("query cancelled");
       space.wait_for(lock, std::chrono::milliseconds(20));
     }
@@ -921,7 +928,7 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
     return value;
   };
   for (idx_t r = 0; r < args.size(); r++) {
-    if (ctx.IsInterrupted())
+    if (ContextInterrupted(ctx))
       Fail("query cancelled");
     bool null = false;
     for (idx_t c = 0; c < args.ColumnCount(); c++)
@@ -994,7 +1001,7 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
     if (rows[r].cached)
       continue;
     for (auto &q : rows[r].questions.items()) {
-      if (ctx.IsInterrupted())
+      if (ContextInterrupted(ctx))
         Fail("query cancelled");
       Json wire = q.value();
       wire["instructions"] = {{"instructions", q.value()["instructions"]},
@@ -1040,7 +1047,7 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
   futures.reserve(packs.size());
   auto process = [&](size_t i, CURL *curl) {
     try {
-      if (stopped.load() || ctx.IsInterrupted())
+      if (stopped.load() || ContextInterrupted(ctx))
         return;
       if (!curl)
         Fail("curl allocation failed");
@@ -1089,7 +1096,7 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
   }
   for (auto &f : futures)
     f.get();
-  if (ctx.IsInterrupted())
+  if (ContextInterrupted(ctx))
     Fail("query cancelled");
   if (error) {
     try {

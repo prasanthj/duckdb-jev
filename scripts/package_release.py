@@ -27,6 +27,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", required=True, type=release_tag)
     parser.add_argument("--platform", required=True, choices=["linux_amd64", "linux_arm64", "osx_amd64", "osx_arm64"])
+    parser.add_argument(
+        "--duckdb-version",
+        default=os.environ.get("DUCKDB_VERSION", "1.5.5"),
+        choices=["1.4.5", "1.5.5"],
+    )
     args = parser.parse_args()
     binary = ROOT / "build/extension/jev/jev.duckdb_extension"
     # The smoke query is deliberately null and must not perform inference.
@@ -35,7 +40,7 @@ def main() -> None:
     os.environ["TYPESAFE_API_KEY"] = "package-smoke-never-sent"
     with duckdb.connect(config={"allow_unsigned_extensions": True}) as con:
         actual = con.execute("PRAGMA platform").fetchone()
-        if actual != (args.platform,) or duckdb.__version__ != "1.5.5":
+        if actual != (args.platform,) or duckdb.__version__ != args.duckdb_version:
             raise RuntimeError(f"Runtime mismatch: DuckDB {duckdb.__version__}, platform {actual}")
         con.execute(f"LOAD '{binary}'")
         con.execute("SET jev_endpoint = 'http://127.0.0.1:1/v1/systemone'")
@@ -145,7 +150,7 @@ def main() -> None:
             tar.add(ROOT / "docs/distribution.md", arcname="DISTRIBUTION.md")
             tar.add(ROOT / "LICENSE", arcname="LICENSE")
             tar.add(ROOT / "NOTICE", arcname="NOTICE")
-            tar.add(ROOT / "vendor/duckdb/LICENSE", arcname="LICENSE.duckdb")
+            tar.add(ROOT / f"vendor/duckdb-{args.duckdb_version}/LICENSE", arcname="LICENSE.duckdb")
             tar.add(ROOT / "src/include/LICENSE.nlohmann-json", arcname="LICENSE.nlohmann-json")
     archive.with_suffix(archive.suffix + ".sha256").write_text(
         f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n"

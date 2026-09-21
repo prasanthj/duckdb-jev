@@ -24,7 +24,7 @@ def test_release_archive_loads_and_contains_verifiable_metadata() -> None:
         text=True,
     )
     assert completed.returncode == 0, f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
-    archive = root / "dist" / f"jev-v0.0.0-test-duckdb-v1.5.5-{platform}.tar.gz"
+    archive = root / "dist" / f"jev-v0.0.0-test-duckdb-v{duckdb.__version__}-{platform}.tar.gz"
     checksum = archive.with_suffix(".gz.sha256")
     try:
         assert checksum.read_text() == f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n"
@@ -40,7 +40,7 @@ def test_release_archive_loads_and_contains_verifiable_metadata() -> None:
             manifest = json.load(metadata)
             sbom = json.load(sbom_file)
             assert manifest["platform"] == platform
-            assert manifest["duckdb_version"] == "1.5.5"
+            assert manifest["duckdb_version"] == duckdb.__version__
             assert manifest["release"] == "v0.0.0-test"
             assert manifest["signed"] is False
             assert manifest["sha256"] == hashlib.sha256(binary.read()).hexdigest()

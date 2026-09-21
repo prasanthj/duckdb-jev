@@ -15,24 +15,48 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
-    name: ${{ matrix.platform }} / DuckDB 1.5.5
+    name: ${{ matrix.platform }} / DuckDB ${{ matrix.duckdb_version }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux_amd64
+            duckdb_version: '1.4.5'
             runner: ubuntu-22.04
             container: ubuntu:22.04
             build_jobs: 4
           - platform: linux_arm64
+            duckdb_version: '1.4.5'
             runner: ubuntu-24.04-arm
             container: ubuntu:22.04
             build_jobs: 2
           - platform: osx_amd64
+            duckdb_version: '1.4.5'
             runner: macos-15-intel
             container: ''
             build_jobs: 4
           - platform: osx_arm64
+            duckdb_version: '1.4.5'
+            runner: macos-14
+            container: ''
+            build_jobs: 3
+          - platform: linux_amd64
+            duckdb_version: '1.5.5'
+            runner: ubuntu-22.04
+            container: ubuntu:22.04
+            build_jobs: 4
+          - platform: linux_arm64
+            duckdb_version: '1.5.5'
+            runner: ubuntu-24.04-arm
+            container: ubuntu:22.04
+            build_jobs: 2
+          - platform: osx_amd64
+            duckdb_version: '1.5.5'
+            runner: macos-15-intel
+            container: ''
+            build_jobs: 4
+          - platform: osx_arm64
+            duckdb_version: '1.5.5'
             runner: macos-14
             container: ''
             build_jobs: 3
@@ -44,6 +68,7 @@ jobs:
       JEV_BUILD_JOBS: ${{ matrix.build_jobs }}
       UV_PYTHON: '3.11'
       JEV_RUN_LIVE: '0'
+      DUCKDB_VERSION: ${{ matrix.duckdb_version }}
     steps:
       - name: Install Linux toolchain
         if: runner.os == 'Linux'
@@ -93,9 +118,9 @@ jobs:
         with:
           path: |
             build
-            vendor/duckdb
+            vendor/duckdb-*
             vendor/duckdb-static
-          key: native-v3-unity-cxx17-nojemalloc-${{ matrix.platform }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('build.sh', 'CMakeLists.txt', 'extension_config.cmake', 'uv.lock') }}
+          key: native-v4-unity-cxx17-nojemalloc-duckdb-${{ matrix.duckdb_version }}-${{ matrix.platform }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('build.sh', 'CMakeLists.txt', 'extension_config.cmake', 'uv.lock') }}
       - name: Build Linux
         if: runner.os == 'Linux'
         run: ./build.sh
@@ -111,28 +136,29 @@ jobs:
         with:
           path: |
             build
-            vendor/duckdb
+            vendor/duckdb-*
+            vendor/duckdb-static
           key: ${{ steps.native-cache.outputs.cache-primary-key }}
       - name: Test the real native binary (local HTTP only)
         run: |
-          uv run pytest -q --junitxml=test-results.xml
+          uv run --with "duckdb==$DUCKDB_VERSION" pytest -q --junitxml=test-results.xml
           uv run ruff check tests benchmarks scripts
           uv run pyright tests benchmarks scripts
       - name: Upload native test results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: tests-${{ matrix.platform }}
+          name: tests-duckdb-${{ matrix.duckdb_version }}-${{ matrix.platform }}
           path: test-results.xml
           if-no-files-found: ignore
           retention-days: 14
       - name: Package verified artifact
         env:
           TARGET_PLATFORM: ${{ matrix.platform }}
-        run: uv run python scripts/package_release.py --tag "$RELEASE_TAG" --platform "$TARGET_PLATFORM"
+        run: uv run --with "duckdb==$DUCKDB_VERSION" python scripts/package_release.py --tag "$RELEASE_TAG" --platform "$TARGET_PLATFORM" --duckdb-version "$DUCKDB_VERSION"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: jev-${{ matrix.platform }}
+          name: jev-duckdb-${{ matrix.duckdb_version }}-${{ matrix.platform }}
           path: dist/*
           if-no-files-found: error
           retention-days: 14
@@ -162,12 +188,14 @@ jobs:
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
           subject-path: dist/*.tar.gz
-      - name: Verify all four platforms and publish
+      - name: Verify all eight targets and publish
         shell: bash
         run: |
           set -euo pipefail
-          for platform in linux_amd64 linux_arm64 osx_amd64 osx_arm64; do
-            test -f "dist/jev-${RELEASE_TAG}-duckdb-v1.5.5-${platform}.tar.gz"
+          for version in 1.4.5 1.5.5; do
+            for platform in linux_amd64 linux_arm64 osx_amd64 osx_arm64; do
+              test -f "dist/jev-${RELEASE_TAG}-duckdb-v${version}-${platform}.tar.gz"
+            done
           done
           (cd dist && sha256sum -c ./*.sha256)
           if git rev-parse --verify "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
@@ -177,7 +205,7 @@ jobs:
           if gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' > release-state.txt 2>/dev/null; then
             test "$(cat release-state.txt)" = true
           else
-            gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --title "Jev $RELEASE_TAG / DuckDB 1.5.5" --notes-file docs/release-notes.md
+            gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --title "Jev $RELEASE_TAG / DuckDB 1.4.5 and 1.5.5" --notes-file docs/release-notes.md
           fi
           gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/*.sha256 --clobber
           gh release edit "$RELEASE_TAG" --draft=false

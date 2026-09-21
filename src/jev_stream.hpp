@@ -44,7 +44,7 @@ struct StreamState : LocalTableFunctionState {
     rows.clear();
   }
   void Check() {
-    if (ctx.IsInterrupted())
+    if (ContextInterrupted(ctx))
       Fail("query cancelled");
     std::exception_ptr failure;
     {

@@ -15,12 +15,18 @@ concurrency:
 
 jobs:
   test:
+    name: DuckDB ${{ matrix.duckdb_version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        duckdb_version: ['1.4.5', '1.5.5']
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
       JEV_BUILD_JOBS: '4'
       JEV_RUN_LIVE: '0'
       UV_PYTHON: '3.11'
+      DUCKDB_VERSION: ${{ matrix.duckdb_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,14 +40,14 @@ jobs:
         run: ./build.sh
       - name: Test and analyze
         run: |
-          uv run pytest -q --junitxml=test-results.xml
+          uv run --with "duckdb==$DUCKDB_VERSION" pytest -q --junitxml=test-results.xml
           uv run ruff check tests benchmarks scripts examples
           uv run pyright tests benchmarks scripts examples
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: native-ci-tests
+          name: native-ci-tests-duckdb-${{ matrix.duckdb_version }}
           path: test-results.xml
           if-no-files-found: ignore
           retention-days: 14

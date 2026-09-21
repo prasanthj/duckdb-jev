@@ -2,7 +2,7 @@
 
 [![Native build and tests](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml/badge.svg)](https://github.com/prasanthj/duckdb-jev/actions/workflows/release.yml)
 [![Native CI](https://github.com/prasanthj/duckdb-jev/actions/workflows/ci.yml/badge.svg)](https://github.com/prasanthj/duckdb-jev/actions/workflows/ci.yml)
-[![DuckDB 1.5.5](https://img.shields.io/badge/DuckDB-1.5.5-fff000?logo=duckdb&logoColor=black)](https://duckdb.org/docs/stable/extensions/extension_distribution)
+[![DuckDB 1.4.5 and 1.5.5](https://img.shields.io/badge/DuckDB-1.4.5%20%7C%201.5.5-fff000?logo=duckdb&logoColor=black)](https://duckdb.org/docs/stable/extensions/extension_distribution)
 [![Targets: macOS and Linux, x86-64 and ARM64](https://img.shields.io/badge/targets-macOS%20%7C%20Linux%20%C2%B7%20x86--64%20%7C%20ARM64-blue)](docs/distribution.md)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -41,16 +41,17 @@ The 100- and 1,000-row figures are medians of three complete queries and include
 
 *Real Jev responses on synthetic data; timings are from one local run. Reproduce the animation with `vhs examples/terminal_demo.tape`.*
 
-Implemented and tested on macOS arm64 with DuckDB **1.5.5**. The built artifact is `build/extension/jev/jev.duckdb_extension`. Native C++ extensions must match DuckDB's version and platform; other platforms need their own build and verification.
+Implemented and tested with DuckDB **1.4.5** and **1.5.5**. The built artifact is `build/extension/jev/jev.duckdb_extension`. Native C++ extensions must match DuckDB's version and platform; each version/platform combination needs its own build and verification.
 
-Prebuilt archives are published through [GitHub Releases](https://github.com/prasanthj/duckdb-jev/releases) after all four platform builds pass. See [distribution and installation](docs/distribution.md) for compatibility, checksums, and release instructions.
+Prebuilt archives are published through [GitHub Releases](https://github.com/prasanthj/duckdb-jev/releases) after all eight version/platform builds pass. See [distribution and installation](docs/distribution.md) for compatibility, checksums, and release instructions.
 
 ## Build and test
 
 Requirements: `uv`, Git, a C++17 compiler, and libcurl development headers/libraries. macOS Xcode command-line tools provide the native toolchain; Linux generally needs a compiler and libcurl development package. CMake, Ninja, clang-format and Python test tools are installed through uv.
 
 ```sh
-./build.sh
+./build.sh                           # DuckDB 1.5.5 (default)
+DUCKDB_VERSION=1.4.5 ./build.sh      # DuckDB 1.4.5
 uv run pytest -q                  # local HTTP stub, no paid inference
 uv run pyright tests benchmarks scripts examples
 uv run ruff check tests benchmarks scripts examples
@@ -58,7 +59,7 @@ uv run ruff check tests benchmarks scripts examples
 
 The extension links DuckDB's official pinned platform static library into the loadable binary. This keeps it compatible with Python and other hosts that do not export DuckDB symbols globally, without recompiling DuckDB core.
 
-The first build downloads pinned DuckDB v1.5.5 headers and the matching official static-library archive, verifies both the source commit and archive SHA-256, then compiles only the extension and a small platform probe. Subsequent builds are incremental. The vendored nlohmann JSON header is v3.12.0 and retains its upstream MIT license notice. No daemon is left running by the tests or benchmarks.
+The first build downloads pinned headers and the matching official static-library archive for the selected DuckDB version, verifies both the source commit and archive SHA-256, then compiles only the extension and a small platform probe. Subsequent builds are incremental. Run the matching suite with `DUCKDB_VERSION=1.4.5 uv run --with duckdb==1.4.5 pytest -q` (or substitute `1.5.5`). The vendored nlohmann JSON header is v3.12.0 and retains its upstream MIT license notice. No daemon is left running by the tests or benchmarks.
 
 ## License
 
