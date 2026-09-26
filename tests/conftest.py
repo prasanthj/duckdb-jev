@@ -1,6 +1,7 @@
 """Deterministic HTTP/1.1 service; never invokes paid inference."""
 
 import json
+import os
 import socket
 import threading
 import time
@@ -12,7 +13,7 @@ from typing import Any
 import duckdb
 import pytest
 
-EXTENSION = Path(__file__).resolve().parents[1] / "build/extension/jev/jev.duckdb_extension"
+EXTENSION = Path(__file__).resolve().parents[1] / os.environ.get("JEV_BUILD_DIR", "build") / "extension/jev/jev.duckdb_extension"
 
 
 class TestHTTPServer(ThreadingHTTPServer):
@@ -163,7 +164,7 @@ def connect(stub: Stub) -> duckdb.DuckDBPyConnection:
 @pytest.fixture
 def db(stub: Stub) -> Iterator[duckdb.DuckDBPyConnection]:
     if not EXTENSION.is_file():
-        pytest.fail("Build native extension first: ./build.sh")
+        pytest.fail(f"Build native extension first: {EXTENSION} (./build.sh)")
     con = connect(stub)
     yield con
     con.close()
