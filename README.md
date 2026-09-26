@@ -16,6 +16,7 @@ High-throughput, robust native C++ DuckDB extension for semantic predicates, cla
 ## Features
 
 - **SQL-native judgments:** Noul predicates, finite Choice classification, ordered Score rubrics and mixed multi-question evaluation.
+- **Direct OpenRouter backend:** optional native structured-output transport with separate credentials, cache isolation, and strict answer validation; its model-estimated probabilities are not Jev-calibrated.
 - **Batched and streaming execution:** packs up to 1,000 independent judgments per request, runs bounded concurrent HTTP work and streams across DuckDB chunks.
 - **Structured evidence:** evaluates text, JSON, STRUCT, LIST and ARRAY values without exporting columns through Python or pandas.
 - **Safe credentials:** reads a scoped DuckDB `jev` secret first and falls back to `TYPESAFE_API_KEY`; API keys never appear in query results or cache keys.
@@ -114,6 +115,8 @@ CREATE SECRET (TYPE jev, API_KEY '...', MODEL 'jev-1.13.0');
 
 `ENDPOINT` is also supported. A matching DuckDB secret takes precedence over `TYPESAFE_API_KEY`; the environment variable remains the convenient local fallback. The native extension uses the HTTP API directly and does not load credential files or depend on the Python SDK. Input data goes to TypeSafe for remote inference. DuckDB `enable_external_access=false` prevents requests.
 
+For first-class native OpenRouter use, see the [OpenRouter backend guide](docs/openrouter.md). It uses a separate key and model setting, and its probabilities are uncalibrated model estimates rather than Jev probabilities.
+
 ## Functions
 
 | Function | Returns |
@@ -129,7 +132,7 @@ Evidence supports text, JSON objects/arrays, and nested DuckDB STRUCT/LIST/ARRAY
 
 Instructions accept strings, STRUCTs, lists or JSON. Plain text instructions are never heuristically parsed. Criteria accept JSON text/JSON/STRUCT for Choice/Noul and JSON text/JSON/list for Score. Choice supports 1–255 options, Score 2–10 ordered levels; optional Noul criteria describe `true`/`false`. Choice descriptions and Score levels may be nested objects/arrays. Unknown question fields/types are rejected.
 
-`confidence` is the provider's distribution-derived confidence, not necessarily the winning-label probability. Noul has no separate confidence. Score is the expected rubric index, potentially fractional, not an automatic 0–100 band. Access outputs with `(jev_choice(...)).choice`, etc. Materialize results when multiple downstream columns or filters need the same judgment:
+With TypeSafe, `confidence` is the provider's distribution-derived confidence, not necessarily the winning-label probability. With OpenRouter, the extension reports the largest model-estimated probability as `confidence`; it is not calibrated. Noul has no separate confidence. Score is the expected rubric index, potentially fractional, not an automatic 0–100 band. Access outputs with `(jev_choice(...)).choice`, etc. Materialize results when multiple downstream columns or filters need the same judgment:
 
 ```sql
 CREATE TEMP TABLE judged AS
@@ -147,7 +150,7 @@ See [renewal.sql](examples/renewal.sql) for a realistic multi-question account w
 
 ## Batching and concurrency
 
-The scalar functions process DuckDB chunks. They respect validity/selection vectors, deduplicate identical evidence and questions within a chunk, pack questions into byte/count-bounded HTTP requests, and reassemble answers by IDs regardless of completion order. Constant evidence/instructions/criteria are converted once per chunk. Completed results are also reused across chunks and expressions within the same query. Payload packing uses incremental byte accounting rather than repeatedly copying/serializing a growing request.
+The scalar functions process DuckDB chunks. They respect validity/selection vectors, deduplicate identical evidence and questions within a chunk, pack questions into byte/count-bounded HTTP requests, and reassemble answers by IDs regardless of completion order. Constant evidence/instructions/criteria are converted once per chunk. Completed results are also reused across chunks and expressions within the same query. TypeSafe payload packing uses incremental byte accounting. OpenRouter packing checks the final serialized chat body and schema for each addition.
 
 A persistent 10-worker pool reuses CURL connection caches across chunks. The scheduler admits tasks only when their connection's concurrency limit permits, so a concurrency-1 query does not occupy all workers with waiting tasks. At most 10 requests run across the process.
 
