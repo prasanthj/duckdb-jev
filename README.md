@@ -66,6 +66,8 @@ uv run ruff check tests benchmarks scripts examples
 
 The extension links DuckDB's official pinned platform static library into the loadable binary. This keeps it compatible with Python and other hosts that do not export DuckDB symbols globally, without recompiling DuckDB core.
 
+Linux CI also runs the offline native tests with AddressSanitizer and UndefinedBehaviorSanitizer in separate jobs for DuckDB 1.5.5. Set `JEV_BUILD_DIR` to select a non-default build for both `./build.sh` and pytest. The sanitizers instrument this extension, while the pinned DuckDB static library remains uninstrumented. AddressSanitizer leak detection is disabled for the Python test host.
+
 The first build downloads pinned headers and the matching official static-library archive for the selected DuckDB version, verifies both the source commit and archive SHA-256, then compiles only the extension and a small platform probe. Subsequent builds are incremental. Run the matching suite with `DUCKDB_VERSION=1.4.5 uv run --with duckdb==1.4.5 pytest -q` (or substitute `1.5.5`). The vendored nlohmann JSON header is v3.12.0 and retains its upstream MIT license notice. No daemon is left running by the tests or benchmarks.
 
 ## License

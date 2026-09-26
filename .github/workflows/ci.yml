@@ -51,3 +51,56 @@ jobs:
           path: test-results.xml
           if-no-files-found: ignore
           retention-days: 14
+
+  sanitizer:
+    name: ${{ matrix.sanitizer }} sanitizer (DuckDB 1.5.5)
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, undefined]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      JEV_BUILD_JOBS: '4'
+      JEV_BUILD_DIR: build-${{ matrix.sanitizer }}
+      JEV_RUN_LIVE: '0'
+      UV_PYTHON: '3.11'
+      DUCKDB_VERSION: '1.5.5'
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install native toolchain
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang libclang-rt-dev libcurl4-openssl-dev
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+      - name: Build instrumented extension
+        run: |
+          ./build.sh \
+            "-DCMAKE_CXX_FLAGS=-O1 -g -fsanitize=${{ matrix.sanitizer }} -fno-omit-frame-pointer -fno-sanitize-recover=all" \
+            "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=${{ matrix.sanitizer }}"
+      - name: Run offline native tests
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+        run: |
+          if [ "$SANITIZER" = address ]; then
+            runtime=$(clang -print-file-name=libclang_rt.asan-x86_64.so)
+            export ASAN_OPTIONS=detect_leaks=0:abort_on_error=1
+          else
+            runtime=$(clang -print-file-name=libclang_rt.ubsan_standalone-x86_64.so)
+            export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+          fi
+          test -f "$runtime"
+          export LD_PRELOAD="$runtime"
+          uv run --with "duckdb==$DUCKDB_VERSION" pytest -q tests/test_extension.py tests/test_stream.py tests/test_query_cache.py tests/test_session_cache.py --junitxml=sanitizer-results.xml
+      - name: Upload sanitizer report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-ci-${{ matrix.sanitizer }}-sanitizer
+          path: sanitizer-results.xml
+          if-no-files-found: ignore
+          retention-days: 14
