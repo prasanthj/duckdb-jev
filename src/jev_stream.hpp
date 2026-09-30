@@ -199,16 +199,11 @@ struct StreamState : LocalTableFunctionState {
                encoded;
       };
       string fragment = entry();
-      if (pack.refs.size() >= options->questions ||
-          pack.payload.size() + fragment.size() + (pack.refs.empty() ? 0 : 1) +
-                  2 >
-              options->bytes) {
+      if (!PackFits(pack.payload, fragment, pack.refs.size(), *options)) {
         Flush();
         fragment = entry();
       }
-      if (pack.payload.size() + fragment.size() + (pack.refs.empty() ? 0 : 1) +
-              2 >
-          options->bytes)
+      if (!PackFits(pack.payload, fragment, pack.refs.size(), *options))
         Fail("single question exceeds request byte budget");
       if (!pack.refs.empty())
         pack.payload += ",";

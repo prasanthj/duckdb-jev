@@ -198,7 +198,7 @@ static Value Setting(ClientContext &ctx, const string &name) {
   return result;
 }
 struct Options {
-  string model, endpoint, key;
+  string backend, model, endpoint, key;
   size_t questions, bytes, cache_bytes, session_bytes, max_query_questions,
       max_query_requests;
   int64_t session_ttl;
@@ -211,7 +211,7 @@ static string Trim(string s) {
   return begin == string::npos ? "" : s.substr(begin, end - begin + 1);
 }
 struct JevSecretOptions {
-  string key, endpoint, model;
+  string backend, key, endpoint, model;
 };
 static void CopySecretOption(const string &name, const CreateSecretInput &input,
                              KeyValueSecret &secret) {
@@ -224,6 +224,7 @@ static unique_ptr<BaseSecret> CreateJevSecret(ClientContext &,
   auto secret = make_uniq<KeyValueSecret>(input.scope, input.type,
                                           input.provider, input.name);
   CopySecretOption("api_key", input, *secret);
+  CopySecretOption("backend", input, *secret);
   CopySecretOption("endpoint", input, *secret);
   CopySecretOption("model", input, *secret);
   secret->redact_keys.insert("api_key");
@@ -237,6 +238,7 @@ static void RegisterJevSecret(ExtensionLoader &loader) {
   loader.RegisterSecretType(type);
   CreateSecretFunction function{"jev", "config", CreateJevSecret};
   function.named_parameters["api_key"] = VarcharType();
+  function.named_parameters["backend"] = VarcharType();
   function.named_parameters["endpoint"] = VarcharType();
   function.named_parameters["model"] = VarcharType();
   loader.RegisterFunction(function);
@@ -250,6 +252,8 @@ static JevSecretOptions Secret(ClientContext &ctx) {
     return result;
   const auto &secret = dynamic_cast<const KeyValueSecret &>(match.GetSecret());
   Value value;
+  if (secret.TryGetValue("backend", value) && !value.IsNull())
+    result.backend = value.ToString();
   if (secret.TryGetValue("api_key", value) && !value.IsNull())
     result.key = value.ToString();
   if (secret.TryGetValue("endpoint", value) && !value.IsNull())
@@ -258,21 +262,61 @@ static JevSecretOptions Secret(ClientContext &ctx) {
     result.model = value.ToString();
   return result;
 }
-static string EnvironmentKey() {
-  const auto env = std::getenv("TYPESAFE_API_KEY");
+static string EnvironmentKey(const string &backend) {
+  const auto env = std::getenv(backend == "openrouter" ? "OPENROUTER_API_KEY"
+                                                       : "TYPESAFE_API_KEY");
   const string key = env ? Trim(env) : "";
   return key;
+}
+static bool TrustedEndpoint(const string &endpoint) {
+  std::unique_ptr<CURLU, decltype(&curl_url_cleanup)> url(curl_url(),
+                                                          curl_url_cleanup);
+  if (!url ||
+      curl_url_set(url.get(), CURLUPART_URL, endpoint.c_str(), 0) != CURLUE_OK)
+    return false;
+  char *scheme = nullptr, *host = nullptr, *user = nullptr, *password = nullptr;
+  const auto scheme_ok =
+      curl_url_get(url.get(), CURLUPART_SCHEME, &scheme, 0) == CURLUE_OK;
+  const auto host_ok =
+      curl_url_get(url.get(), CURLUPART_HOST, &host, 0) == CURLUE_OK;
+  const auto has_user =
+      curl_url_get(url.get(), CURLUPART_USER, &user, 0) == CURLUE_OK;
+  const auto has_password =
+      curl_url_get(url.get(), CURLUPART_PASSWORD, &password, 0) == CURLUE_OK;
+  const bool trusted =
+      scheme_ok && host_ok && !has_user && !has_password &&
+      (string(scheme) == "https" ||
+       (string(scheme) == "http" &&
+        (string(host) == "localhost" || string(host) == "127.0.0.1")));
+  curl_free(scheme);
+  curl_free(host);
+  curl_free(user);
+  curl_free(password);
+  return trusted;
 }
 static Options ReadOptions(ClientContext &ctx) {
   if (!Setting(ctx, "enable_external_access").GetValue<bool>())
     Fail("external access is disabled");
   Options o;
-  o.model = Setting(ctx, "jev_model").GetValue<string>();
-  o.endpoint = Setting(ctx, "jev_endpoint").GetValue<string>();
   const auto secret = Secret(ctx);
-  if (!secret.model.empty())
+  o.backend = Setting(ctx, "jev_backend").GetValue<string>();
+  if (!secret.backend.empty())
+    o.backend = secret.backend;
+  if (o.backend != "typesafe" && o.backend != "openrouter")
+    Fail("jev_backend must be 'typesafe' or 'openrouter'");
+  const bool matching_secret = !secret.backend.empty()
+                                   ? secret.backend == o.backend
+                                   : o.backend == "typesafe";
+  o.model = Setting(ctx, o.backend == "openrouter" ? "jev_openrouter_model"
+                                                   : "jev_model")
+                .GetValue<string>();
+  o.endpoint =
+      Setting(ctx, o.backend == "openrouter" ? "jev_openrouter_endpoint"
+                                             : "jev_endpoint")
+          .GetValue<string>();
+  if (matching_secret && !secret.model.empty())
     o.model = secret.model;
-  if (!secret.endpoint.empty())
+  if (matching_secret && !secret.endpoint.empty())
     o.endpoint = secret.endpoint;
   auto q = Setting(ctx, "jev_batch_size").GetValue<int64_t>();
   auto b = Setting(ctx, "jev_max_request_bytes").GetValue<int64_t>();
@@ -292,10 +336,11 @@ static Options ReadOptions(ClientContext &ctx) {
       max_requests > 10000000 || o.model.empty())
     Fail("invalid Jev settings (batch 1-1000, bytes 256-1048576, concurrency "
          "1-10, timeout 1-300000ms, retries 0-5, and positive query budgets)");
-  if (o.endpoint.rfind("https://", 0) != 0 &&
-      o.endpoint.rfind("http://127.0.0.1:", 0) != 0 &&
-      o.endpoint.rfind("http://localhost:", 0) != 0)
-    Fail("endpoint requires HTTPS (HTTP allowed only on loopback)");
+  if (o.backend == "openrouter" && q > 100)
+    Fail("OpenRouter batch size must be at most 100 questions");
+  if (!TrustedEndpoint(o.endpoint))
+    Fail("endpoint requires HTTPS (HTTP allowed only on loopback, without "
+         "URL credentials)");
   auto cache = Setting(ctx, "jev_cache_bytes").GetValue<int64_t>();
   if (cache < 0 || cache > 64 * 1024 * 1024)
     Fail("jev_cache_bytes must be between zero and 64MiB");
@@ -318,10 +363,14 @@ static Options ReadOptions(ClientContext &ctx) {
   o.retry_max_delay_ms = retry_max;
   o.max_query_questions = max_questions;
   o.max_query_requests = max_requests;
-  o.key = secret.key.empty() ? EnvironmentKey() : Trim(secret.key);
+  o.key = matching_secret && !secret.key.empty() ? Trim(secret.key)
+                                                 : EnvironmentKey(o.backend);
   if (o.key.empty() || o.key.find_first_of("\r\n") != string::npos)
-    Fail("no valid Jev credential; run CREATE SECRET (TYPE jev, API_KEY '...') "
-         "or set TYPESAFE_API_KEY");
+    Fail(o.backend == "openrouter"
+             ? "no valid OpenRouter credential; set OPENROUTER_API_KEY or "
+               "CREATE SECRET (TYPE jev, BACKEND 'openrouter', API_KEY '...')"
+             : "no valid Jev credential; run CREATE SECRET (TYPE jev, API_KEY "
+               "'...') or set TYPESAFE_API_KEY");
   return o;
 }
 // QueryEnd clears the configuration/key snapshot and query results; the opt-in
@@ -394,8 +443,8 @@ public:
     if (!options) {
       options = ReadOptions(ctx);
       const auto scope = duckdb_mbedtls::MbedTlsWrapper::ComputeSha256Hash(
-          Json::array(
-              {"jev-cache-v1", options->endpoint, options->model, options->key})
+          Json::array({"jev-cache-v1", options->backend, options->endpoint,
+                       options->model, options->key})
               .dump());
       if (scope != session_scope || session_budget != options->session_bytes ||
           session_ttl != options->session_ttl)
@@ -557,18 +606,18 @@ static size_t Header(char *data, size_t size, size_t nmemb, void *ptr) {
     size_t consumed = 0;
     const auto seconds = std::stoll(value, &consumed);
     if (consumed == value.size() && seconds >= 0)
-      t.retry_after_ms = std::min<int64_t>(seconds * 1000, 60000);
+      t.retry_after_ms = std::min<int64_t>(seconds, 60) * 1000;
     else {
       const auto when = curl_getdate(value.c_str(), nullptr);
       const auto now = std::time(nullptr);
       if (when >= now)
-        t.retry_after_ms = std::min<int64_t>((when - now) * 1000, 60000);
+        t.retry_after_ms = std::min<int64_t>(when - now, 60) * 1000;
     }
   } catch (...) {
     const auto when = curl_getdate(value.c_str(), nullptr);
     const auto now = std::time(nullptr);
     if (when >= now)
-      t.retry_after_ms = std::min<int64_t>((when - now) * 1000, 60000);
+      t.retry_after_ms = std::min<int64_t>(when - now, 60) * 1000;
   }
   return count;
 }
@@ -621,9 +670,12 @@ static void RetryWait(ClientContext &ctx, std::atomic<bool> &stop,
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   }
 }
+#include "openrouter.hpp"
 static Json Request(CURL *curl, const string &payload, size_t question_count,
                     const Options &o, ClientContext &ctx,
                     std::atomic<bool> &stop) {
+  const string wire_payload =
+      o.backend == "openrouter" ? OpenRouterRequest(payload, o) : payload;
   Gate gate(ctx, stop, o.concurrency);
   Transfer transfer{"", &ctx, &stop, -1};
   curl_easy_reset(curl);
@@ -635,9 +687,9 @@ static Json Request(CURL *curl, const string &payload, size_t question_count,
       headers, curl_slist_free_all);
   curl_easy_setopt(curl, CURLOPT_URL, o.endpoint.c_str());
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.c_str());
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, wire_payload.c_str());
   curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE,
-                   (curl_off_t)payload.size());
+                   (curl_off_t)wire_payload.size());
   curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, o.timeout);
   curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, o.timeout);
   curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
@@ -665,7 +717,7 @@ static Json Request(CURL *curl, const string &payload, size_t question_count,
     transfer.body.clear();
     transfer.retry_after_ms = -1;
     status = 0;
-    metrics.request_bytes += payload.size();
+    metrics.request_bytes += wire_payload.size();
     code = curl_easy_perform(curl);
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
     metrics.response_bytes += transfer.body.size();
@@ -699,14 +751,23 @@ static Json Request(CURL *curl, const string &payload, size_t question_count,
     auto response = Json::parse(transfer.body);
     if (response.contains("usage") && response["usage"].is_object()) {
       const auto &reported = response["usage"];
-      if (reported.contains("input_tokens") &&
-          reported["input_tokens"].is_number_unsigned())
-        metrics.input_tokens += reported["input_tokens"].get<uint64_t>();
-      if (reported.contains("output_tokens") &&
-          reported["output_tokens"].is_number_unsigned())
-        metrics.output_tokens += reported["output_tokens"].get<uint64_t>();
+      const auto input_name =
+          o.backend == "openrouter" ? "prompt_tokens" : "input_tokens";
+      const auto output_name =
+          o.backend == "openrouter" ? "completion_tokens" : "output_tokens";
+      if (reported.contains(input_name) &&
+          reported[input_name].is_number_unsigned())
+        metrics.input_tokens += reported[input_name].get<uint64_t>();
+      if (reported.contains(output_name) &&
+          reported[output_name].is_number_unsigned())
+        metrics.output_tokens += reported[output_name].get<uint64_t>();
     }
+    if (o.backend == "openrouter")
+      response = OpenRouterResponse(response, payload);
     return response;
+  } catch (const InvalidInputException &) {
+    metrics.errors++;
+    throw;
   } catch (...) {
     metrics.errors++;
     Fail("provider returned invalid JSON");
@@ -1012,10 +1073,7 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
                encoded;
       };
       string entry = fragment();
-      if (current.refs.size() >= o.questions ||
-          current.payload.size() + entry.size() +
-                  (current.refs.empty() ? 0 : 1) + 2 >
-              o.bytes) {
+      if (!PackFits(current.payload, entry, current.refs.size(), o)) {
         if (!current.refs.empty()) {
           current.payload += "}}";
           packs.push_back(std::move(current));
@@ -1023,7 +1081,7 @@ static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
           packed_bytes += prefix.size() + 2;
           entry = fragment();
         }
-        if (current.payload.size() + entry.size() + 2 > o.bytes)
+        if (!PackFits(current.payload, entry, current.refs.size(), o))
           Fail("single question exceeds request byte budget");
       }
       packed_bytes += entry.size() + (current.refs.empty() ? 0 : 1);
@@ -1211,9 +1269,11 @@ static void StatsScan(ClientContext &, TableFunctionInput &input,
   for (idx_t i = 0; i < 9; i++)
     output.SetValue(i, 0, Value::UBIGINT(counters[i]));
   output.SetValue(
-      9, 0, Value(static_cast<double>(metrics.total_latency_us.load()) / 1000.0));
+      9, 0,
+      Value(static_cast<double>(metrics.total_latency_us.load()) / 1000.0));
   output.SetValue(
-      10, 0, Value(static_cast<double>(metrics.max_latency_us.load()) / 1000.0));
+      10, 0,
+      Value(static_cast<double>(metrics.max_latency_us.load()) / 1000.0));
   output.SetCardinality(1);
 }
 static void RegisterStats(ExtensionLoader &loader) {
@@ -1249,6 +1309,14 @@ static void Load(ExtensionLoader &loader) {
                             BigintType(), Value::BIGINT(8 * 1024 * 1024));
   config.AddExtensionOption("jev_model", "TypeSafe model", VarcharType(),
                             Value("jev-latest"));
+  config.AddExtensionOption("jev_backend",
+                            "Inference backend (typesafe or openrouter)",
+                            VarcharType(), Value("typesafe"));
+  config.AddExtensionOption("jev_openrouter_model", "OpenRouter model",
+                            VarcharType(), Value("openai/gpt-4o-mini"));
+  config.AddExtensionOption(
+      "jev_openrouter_endpoint", "Trusted OpenRouter chat endpoint",
+      VarcharType(), Value("https://openrouter.ai/api/v1/chat/completions"));
   config.AddExtensionOption("jev_endpoint", "Trusted TypeSafe endpoint",
                             VarcharType(),
                             Value("https://api.typesafe.ai/v1/systemone"));
