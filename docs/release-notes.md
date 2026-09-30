@@ -1,4 +1,4 @@
-Native Jev extension for DuckDB **1.4.5** and **1.5.5**.
+Native Jev extension v0.2.2 for DuckDB **1.4.5** and **1.5.6**.
 
 - Semantic predicates, finite-choice classification, rubric scoring, and mixed question evaluation from SQL.
 - Bounded batching and concurrent HTTP transport, with streaming relational input.

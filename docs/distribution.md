@@ -1,6 +1,6 @@
 # Native binary distribution
 
-Release archives target DuckDB **1.4.5** or **1.5.5** and one of `linux_amd64`, `linux_arm64`, `osx_amd64`, or `osx_arm64`. Check `SELECT version();` and `PRAGMA platform;` in the consuming runtime before choosing an archive. Native extensions require an exact DuckDB version and platform match.
+Release archives target DuckDB **1.4.5** or **1.5.6** and one of `linux_amd64`, `linux_arm64`, `osx_amd64`, or `osx_arm64`. Check `SELECT version();` and `PRAGMA platform;` in the consuming runtime before choosing an archive. Native extensions require an exact DuckDB version and platform match.
 
 Linux builds use Ubuntu 22.04 (glibc 2.35 baseline) and require libcurl.so.4, libstdc++.so.6, and CA certificates. They do not target Alpine/musl. macOS builds target macOS 12 or later and use Apple system libcurl. Test the archive in your actual deployment image before shipping it.
 
@@ -9,9 +9,9 @@ Linux builds use Ubuntu 22.04 (glibc 2.35 baseline) and require libcurl.so.4, li
 Download the platform archive and its `.sha256` file from this repository's GitHub Releases. Private repository downloads require an authenticated GitHub account with access. Verify the checksum before extraction:
 
 ```sh
-sha256sum -c jev-v0.1.0-duckdb-v1.5.5-linux_amd64.tar.gz.sha256
+sha256sum -c jev-v0.2.2-duckdb-v1.5.6-linux_amd64.tar.gz.sha256
 # macOS: shasum -a 256 -c <archive>.sha256
-tar -xzf jev-v0.1.0-duckdb-v1.5.5-linux_amd64.tar.gz
+tar -xzf jev-v0.2.2-duckdb-v1.5.6-linux_amd64.tar.gz
 ```
 
 Each archive contains the extension, a compatibility manifest, an SPDX 2.3 SBOM, documentation, the Apache 2.0 project license and NOTICE, and dependency license notices. Pin the release and checksum in deployment builds; install runtime libraries and copy the extension into the image. Supply credentials only at runtime, either through a DuckDB `jev` secret or `TYPESAFE_API_KEY`.

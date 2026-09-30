@@ -6,9 +6,9 @@ Status: proposed, for discussion. Researched 2026-09-17. This document distingui
 
 Make semantic predicates, classification and scoring available beside ordinary relational operations. SQL first reduces candidate rows with exact filters/joins, then Jev judges the selected evidence. This is remote inference; data is sent to TypeSafe. It is not a local model or an index, and scan cost grows with uncached evidence.
 
-Recommend a native C++ extension targeting released DuckDB v1.5.5 initially. It runs through DuckDB CLI and language clients without a Python interpreter. Use DuckDB's official C++ extension template and libcurl for pooled TLS HTTP. Python via uv is for fixture tooling and integration tests, not production inference. Pin DuckDB and toolchain revisions in the implementation.
+Recommend a native C++ extension targeting released DuckDB v1.5.6. It runs through DuckDB CLI and language clients without a Python interpreter. Use DuckDB's official C++ extension template and libcurl for pooled TLS HTTP. Python via uv is for fixture tooling and integration tests, not production inference. Pin DuckDB and toolchain revisions in the implementation.
 
-A Python Arrow UDF is useful for prototyping request packing, but requires registration in a Python process and is not an installable native extension. Do not present it as the requested deliverable. The official C extension template avoids building DuckDB, but is marked experimental. Current main headers include scalar bind/init APIs marked stable in 1.5.6, beyond the latest released 1.5.5 observed today. Do not depend on unreleased APIs accidentally. C++ offers the needed binder, connection state, configuration and secret integration at the cost of building per supported DuckDB version/platform.
+A Python Arrow UDF is useful for prototyping request packing, but requires registration in a Python process and is not an installable native extension. Do not present it as the requested deliverable. The official C extension template avoids building DuckDB, but is marked experimental. DuckDB 1.5.6 includes the scalar bind/init APIs used by this extension. Keep the implementation pinned to released APIs and verified version-specific binaries. C++ offers the needed binder, connection state, configuration and secret integration at the cost of building per supported DuckDB version/platform.
 
 ## Verified TypeSafe surface
 
@@ -100,7 +100,7 @@ Recommended baseline: native C++, typed result structs, explicit predicate thres
 - https://docs.typesafe.ai/sdk/python/api/clients/sync/client.md
 - https://github.com/duckdb/extension-template (observed main cfaf3e236008e782d27f4341b0ee036002d0a449)
 - https://github.com/duckdb/extension-template-c (observed main d20892fa19756ca4839fbb4e7ce62b1aceb39ae5)
-- https://github.com/duckdb/duckdb/releases/tag/v1.5.5
+- https://github.com/duckdb/duckdb/releases/tag/v1.5.6
 - https://github.com/duckdb/duckdb/blob/main/src/include/duckdb.h (main is research only, not our release target)
 
 The PostgreSQL screenshot is inspiration only. Its row-count, latency, cache and price claims have not been independently reproduced.

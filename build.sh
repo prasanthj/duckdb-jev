@@ -2,11 +2,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 uv sync --frozen --python 3.11
-duckdb_version="${DUCKDB_VERSION:-1.5.5}"
+duckdb_version="${DUCKDB_VERSION:-1.5.6}"
 case "$duckdb_version" in
   1.4.5) source_commit=f31be57c1845a8895169fd58142040be26d433cf ;;
-  1.5.5) source_commit=d8cdaa33fda8df955cc76ef58a280f68f4cd43fa ;;
-  *) echo "Unsupported DuckDB version: $duckdb_version (supported: 1.4.5, 1.5.5)"; exit 1 ;;
+  1.5.6) source_commit=069cc9f9b5be802405797faecc284961b07c70ef ;;
+  *) echo "Unsupported DuckDB version: $duckdb_version (supported: 1.4.5, 1.5.6)"; exit 1 ;;
 esac
 
 source_dir="vendor/duckdb-$duckdb_version"
@@ -23,10 +23,10 @@ case "$duckdb_version-$(uname -s)-$(uname -m)" in
   1.4.5-Linux-aarch64|1.4.5-Linux-arm64) platform=linux-arm64; archive_sha=33f1874c87d31ada3fd57acdd610f6707ad732782d3960a71f395f79c36eb703 ;;
   1.4.5-Darwin-x86_64) platform=osx-amd64; archive_sha=ca7742d71cf586a5ad3165056b6eab95298243ea7367a33d1f335dd0929d25e3 ;;
   1.4.5-Darwin-arm64) platform=osx-arm64; archive_sha=09dff4ba1958f74dbf1688b2ca901a517716a2a329e49759a13e5d6ec14e50fe ;;
-  1.5.5-Linux-x86_64) platform=linux-amd64; archive_sha=deb47c5300f3c99725e84cdb14d214c3b12bbd748b613b1698b938c894cb68eb ;;
-  1.5.5-Linux-aarch64|1.5.5-Linux-arm64) platform=linux-arm64; archive_sha=ea6a34cb49ec2db5ed23d9e8311237c53c32abf9cdbf5dd608c4176c3dd8bfeb ;;
-  1.5.5-Darwin-x86_64) platform=osx-amd64; archive_sha=a27d36fa1247a3ffa1692e7aa0bf4ea4d1e0ee51da7c4df7a5db5217357b1b4d ;;
-  1.5.5-Darwin-arm64) platform=osx-arm64; archive_sha=d79ec66b8a4054b866faada82e9e31f859a713c555b3f1c4b71c4a43d3273e9c ;;
+  1.5.6-Linux-x86_64) platform=linux-amd64; archive_sha=ab3d1d33951b8cb8bdcae740d8e06adf66bfb7ee880a3f7052d7a35088e16d2d ;;
+  1.5.6-Linux-aarch64|1.5.6-Linux-arm64) platform=linux-arm64; archive_sha=56249751117a4c04289764e06eb431352ce33fb3f8e2f30401122d4d0e184139 ;;
+  1.5.6-Darwin-x86_64) platform=osx-amd64; archive_sha=ff1d5092d4a495e9da831c3a2de5f2ee37b5f87ae23ec7e9aa7adb434bd8a134 ;;
+  1.5.6-Darwin-arm64) platform=osx-arm64; archive_sha=e77c382fba15e3f5c0b3265d12e3a4de534699fdb91bcc9d10d4a857a58103d5 ;;
   *) echo "Unsupported native platform: $(uname -s)-$(uname -m)"; exit 1 ;;
 esac
 

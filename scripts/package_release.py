@@ -29,8 +29,8 @@ def main() -> None:
     parser.add_argument("--platform", required=True, choices=["linux_amd64", "linux_arm64", "osx_amd64", "osx_arm64"])
     parser.add_argument(
         "--duckdb-version",
-        default=os.environ.get("DUCKDB_VERSION", "1.5.5"),
-        choices=["1.4.5", "1.5.5"],
+        default=os.environ.get("DUCKDB_VERSION", "1.5.6"),
+        choices=["1.4.5", "1.5.6"],
     )
     args = parser.parse_args()
     binary = ROOT / "build/extension/jev/jev.duckdb_extension"
