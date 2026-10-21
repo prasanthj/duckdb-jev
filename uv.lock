@@ -100,7 +100,7 @@ wheels = [
 
 [[package]]
 name = "duckdb-jev-tests"
-version = "0.2.2"
+version = "0.2.3"
 source = { virtual = "." }
 dependencies = [
     { name = "duckdb" },
