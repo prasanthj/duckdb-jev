@@ -1,3 +1,10 @@
+## Unreleased
+
+- Add DuckDB 2.0.0 builds, SQL regression tests, and native release targets alongside 1.4.5 and 1.5.6.
+- Adapt to DuckDB 2.0's identifier and function APIs and checksum-pinned tar.gz library archives.
+
+## v0.2.2
+
 Native Jev extension v0.2.2 for DuckDB **1.4.5** and **1.5.6**.
 
 - Semantic predicates, finite-choice classification, rubric scoring, and mixed question evaluation from SQL.

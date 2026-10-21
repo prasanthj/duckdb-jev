@@ -262,7 +262,7 @@ struct StreamState : LocalTableFunctionState {
 static unique_ptr<FunctionData> StreamBind(ClientContext &,
                                            TableFunctionBindInput &input,
                                            vector<LogicalType> &types,
-                                           vector<string> &names) {
+                                           vector<SqlIdentifier> &names) {
   if (input.input_table_types.size() != 3)
     throw BinderException(
         "jev_stream expects TABLE columns (row_id, evidence, questions)");

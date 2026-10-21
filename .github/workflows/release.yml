@@ -60,6 +60,26 @@ jobs:
             runner: macos-14
             container: ''
             build_jobs: 3
+          - platform: linux_amd64
+            duckdb_version: '2.0.0'
+            runner: ubuntu-22.04
+            container: ubuntu:22.04
+            build_jobs: 4
+          - platform: linux_arm64
+            duckdb_version: '2.0.0'
+            runner: ubuntu-24.04-arm
+            container: ubuntu:22.04
+            build_jobs: 2
+          - platform: osx_amd64
+            duckdb_version: '2.0.0'
+            runner: macos-15-intel
+            container: ''
+            build_jobs: 4
+          - platform: osx_arm64
+            duckdb_version: '2.0.0'
+            runner: macos-14
+            container: ''
+            build_jobs: 3
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
     timeout-minutes: 120
@@ -188,11 +208,11 @@ jobs:
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
         with:
           subject-path: dist/*.tar.gz
-      - name: Verify all eight targets and publish
+      - name: Verify all twelve targets and publish
         shell: bash
         run: |
           set -euo pipefail
-          for version in 1.4.5 1.5.6; do
+          for version in 1.4.5 1.5.6 2.0.0; do
             for platform in linux_amd64 linux_arm64 osx_amd64 osx_arm64; do
               test -f "dist/jev-${RELEASE_TAG}-duckdb-v${version}-${platform}.tar.gz"
             done
@@ -205,7 +225,7 @@ jobs:
           if gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' > release-state.txt 2>/dev/null; then
             test "$(cat release-state.txt)" = true
           else
-            gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --title "Jev $RELEASE_TAG / DuckDB 1.4.5 and 1.5.6" --notes-file docs/release-notes.md
+            gh release create "$RELEASE_TAG" --draft --target "$GITHUB_SHA" --title "Jev $RELEASE_TAG / DuckDB 1.4.5, 1.5.6 and 2.0.0" --notes-file docs/release-notes.md
           fi
           gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/*.sha256 --clobber
           gh release edit "$RELEASE_TAG" --draft=false

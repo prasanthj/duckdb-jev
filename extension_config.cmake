@@ -1,1 +1,5 @@
-duckdb_extension_load(jev SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR} DONT_LINK)
+if(DUCKDB_VERSION_NUMBER VERSION_LESS "2.0.0")
+  duckdb_extension_load(jev SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR} DONT_LINK)
+else()
+  duckdb_extension_load(jev SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
+endif()

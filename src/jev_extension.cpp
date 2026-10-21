@@ -1,5 +1,6 @@
 #define DUCKDB_EXTENSION_MAIN
 #include "duckdb.hpp"
+#include "duckdb_compat.hpp"
 #include "duckdb/catalog/catalog_transaction.hpp"
 #include "duckdb/execution/expression_executor_state.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -118,7 +119,8 @@ static Json Evidence(const Value &v) {
     Json obj = Json::object();
     auto &values = StructValue::GetChildren(v);
     for (idx_t i = 0; i < values.size(); i++)
-      obj[StructType::GetChildName(v.type(), i)] = Evidence(values[i]);
+      obj[static_cast<const string &>(StructType::GetChildName(v.type(), i))] =
+          Evidence(values[i]);
     return obj;
   }
   case LogicalTypeId::LIST:
@@ -193,7 +195,7 @@ static void ValidateQuestions(const Json &qs) {
 }
 static Value Setting(ClientContext &ctx, const string &name) {
   Value result;
-  if (!ctx.TryGetCurrentSetting(name, result))
+  if (!ctx.TryGetCurrentSetting(SqlIdentifier(name), result))
     Fail("missing setting " + name);
   return result;
 }
@@ -217,7 +219,7 @@ static void CopySecretOption(const string &name, const CreateSecretInput &input,
                              KeyValueSecret &secret) {
   auto value = input.options.find(name);
   if (value != input.options.end())
-    secret.secret_map[name] = value->second;
+    secret.secret_map[SqlIdentifier(name)] = value->second;
 }
 static unique_ptr<BaseSecret> CreateJevSecret(ClientContext &,
                                               CreateSecretInput &input) {
@@ -892,7 +894,7 @@ static Value Probabilities(const Json &j) {
 static void Evaluate(DataChunk &args, ExpressionState &state, Vector &result) {
   auto &ctx = state.GetContext();
   auto &expr = state.expr.Cast<BoundFunctionExpression>();
-  string name = expr.function.name;
+  string name = FunctionName(expr);
   auto query = ctx.registered_state->GetOrCreate<QueryState>("jev_query_state");
   struct Row {
     Json evidence, questions, answers;
@@ -1182,7 +1184,7 @@ struct StatsState : public GlobalTableFunctionState {
 static unique_ptr<FunctionData> StatsBind(ClientContext &,
                                           TableFunctionBindInput &,
                                           vector<LogicalType> &types,
-                                          vector<string> &names) {
+                                          vector<SqlIdentifier> &names) {
   names = {"requests",         "questions",     "cache_hits",
            "retries",          "errors",        "input_tokens",
            "output_tokens",    "request_bytes", "response_bytes",
@@ -1235,7 +1237,7 @@ static void Load(ExtensionLoader &loader) {
         for (idx_t r = 0; r < args.size(); r++)
           result.SetValue(r, Value(true));
       });
-  clear.stability = FunctionStability::VOLATILE;
+  ConfigureVolatileFunction(clear);
   loader.RegisterFunction(clear);
   auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
   config.AddExtensionOption("jev_session_cache_bytes",
@@ -1282,7 +1284,7 @@ static void Load(ExtensionLoader &loader) {
       Value::BIGINT(2000));
   for (string name :
        {"jev", "jev_noul", "jev_choice", "jev_score", "jev_eval"}) {
-    ScalarFunctionSet set(name);
+    ScalarFunctionSet set{SqlIdentifier(name)};
     for (int argc : {2, 3}) {
       if (argc == 2 && name != "jev_noul" && name != "jev_eval")
         continue;
@@ -1291,9 +1293,8 @@ static void Load(ExtensionLoader &loader) {
       vector<LogicalType> args(argc, AnyType());
       if (name == "jev")
         args[2] = DoubleType();
-      ScalarFunction fn(name, args, ReturnType(name), Evaluate);
-      fn.stability = FunctionStability::VOLATILE;
-      fn.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+      ScalarFunction fn(SqlIdentifier(name), args, ReturnType(name), Evaluate);
+      ConfigureVolatileFunction(fn);
       set.AddFunction(fn);
     }
     loader.RegisterFunction(set);

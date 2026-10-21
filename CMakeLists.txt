@@ -5,6 +5,9 @@ find_package(CURL REQUIRED)
 include_directories(src/include)
 build_loadable_extension(jev "" src/jev_extension.cpp)
 target_link_libraries(jev_loadable_extension CURL::libcurl)
+if(DUCKDB_VERSION_NUMBER VERSION_GREATER_EQUAL "2.0.0")
+  target_compile_definitions(jev_loadable_extension PRIVATE JEV_DUCKDB_2=1)
+endif()
 if(JEV_DUCKDB_1_4)
   target_compile_definitions(jev_loadable_extension
                              PRIVATE JEV_DUCKDB_1_4=1)
@@ -19,7 +22,7 @@ if(JEV_PREBUILT_DUCKDB_STATIC_DIR)
          "${JEV_PREBUILT_DUCKDB_STATIC_DIR}/libduckdb_static.a")
     target_link_libraries(jev_loadable_extension
                           ${JEV_DUCKDB_DEPENDENCY_LIBS})
-  else()
+  elseif(DUCKDB_VERSION_NUMBER VERSION_LESS "2.0.0")
     target_link_libraries(jev_loadable_extension
                           dummy_static_extension_loader)
   endif()
